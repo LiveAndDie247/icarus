@@ -71,7 +71,6 @@ const SUN_LINE = 0.70;        // above this: the sun
 const HEAT_TIME   = 4.0;      // seconds in the sun to reach full heat
 const COOL_TIME   = 3.0;      // seconds out of the sun to cool fully
 const MELT_TIME   = 2.0;      // length of the fall
-const SILENCE_TIME = 1.0;     // quiet after the fall, before the results
 const LOST_TIMEOUT = 3.0;     // seconds with no hands that end a flight
 
 // Pitch
@@ -112,12 +111,40 @@ const CALIB_FRAMES = 20;              // detection frames used to learn your neu
 const CAM_TAU = 0.1;                  // camera easing time constant, seconds
 const SUN_ELEV = 41 * Math.PI / 180;  // the sun: fixed in the world, this far above the horizon
 const AIM_CONE = 14 * Math.PI / 180;  // heat only builds with the sun within this angle of centre
-const MELT_PITCH = -0.55, MELT_H = 0.08;             // the fall: nose down, ground rushes up
 const GRID = 2, GRID_LINES = 20;      // ground grid spacing, lines per axis
 const VIEW_FAR = 36;                  // depth-fade distance
 const MOUNTAIN_N = 8, TOWER_N = 5, CLOUD_N = 4, SPEED_N = 50;
 const CLOUD_SPLIT = 5;                // clouds start parting this far ahead
 const WIRE_LEVELS = 8;                // brightness buckets for batched line drawing
+
+// The ones before you: dot figures falling past (more the higher you are)
+const FIG_MAX = 6;
+const FIG_RATE_LOW = 0.04, FIG_RATE_HIGH = 0.5;      // spawns / s at the bottom / top
+const FIG_CLIMBER = 0.15;             // chance one is still climbing beside you first
+const FIG_GRAVITY = 6;
+
+// Your own ghosts: every past flight's path, in localStorage
+const GHOST_KEY = "icarus.ghosts.v1";
+const GHOST_MAX = 50;                 // flights kept
+const GHOST_STEP = 250;               // ms between recorded points
+const GHOST_POINTS = 600;             // per flight (2.5 min)
+
+// The father, standing on the ground ahead
+const FATHER_AHEAD = 12;              // units ahead along your heading
+const FATHER_FOLLOW = 1.5;            // seconds to catch up when you turn (so turns sweep him)
+
+// The long fall
+const FALL_TIME = 10;                 // seconds from the melt to the water
+const FALL_UP = 0.6;                  // while the nose comes down, the ground drops far below
+const FALL_H = 40;                    // ...to this height
+const FALL_G = 2 * (FALL_H - 0.3) / Math.pow(FALL_TIME - FALL_UP, 2);   // reach the water at FALL_TIME
+const FALL_TEXT_AT = FALL_TIME - 1.6; // "he also flew." appears
+const SEA_SPACING = 4, SEA_LINES = 31, SEA_HALF = 60;
+
+// The sun's face and its lies
+const FACE_FROM = 0.75;               // sun size (of max) where the face starts to resolve
+const LIE_HEAT = 0.75;                // anomalies only above this heat
+const LIE_EVERY = 4;                  // average seconds between them
 
 // Body: the hands, drawn big at the bottom corners like fists out ahead
 const HAND_SPAN = 190;                // px from wrist to middle knuckle when drawn
@@ -164,6 +191,15 @@ let sizeBase = 0, sizeSamples = 0;    // your neutral hand size, learned at the 
 let steerOffset = 0;                  // −1..1, for nudging the fists toward the turn
 let sunAim = 0;                       // 1 = sun dead centre, 0 = outside the aim cone
 let meltAlt0 = 0, meltPitch0 = 0, meltH0 = CAM_H_SEA;
+let meltX0 = 0, meltZ0 = 0, meltYaw0 = 0, meltHx = 0, meltHz = 1;   // where the fall began
+
+let figures = [];                     // the ones before you
+const father = { x: 0, z: FATHER_AHEAD };
+let ghosts = loadGhosts();            // past flights: flat [fwd, lat, h, fwd, lat, h, ...]
+let ghostPath = [], lastGhostRec = 0; // the flight being recorded
+let flightOrigin = null;              // { x, z, hx, hz } at take-off; ghosts are laid out from here
+let lie = null;                       // { start, end, kind, dx, dy }: the sun lying to you
+let lieTextUntil = 0;
 
 // Wire scenery in world coordinates (spawned ahead along the current heading)
 const mountains = Array.from({ length: MOUNTAIN_N }, () => spawnMountain({}, 6 + Math.random() * 34));
@@ -271,12 +307,25 @@ function seg3(x1, y1, z1, x2, y2, z2, b) {
 function updateView(now, dt) {
   const k = 1 - Math.exp(-dt / CAM_TAU);           // ~100 ms camera easing
   if (mode === "melt") {
-    const u = clamp((now - meltStart) / 1000 / MELT_TIME, 0, 1), e = u * u;
-    viewAlt = meltAlt0 * (1 - e);
-    view.pitch = lerp(meltPitch0, MELT_PITCH, Math.min(1, u * 1.6));   // nose down
-    view.h = lerp(meltH0, MELT_H, e);                                  // ground rushes up
-    bank += (Math.sin(u * 9) * 0.3 * u - bank) * k;                    // tumbling wobble
-    yawRate += (0 - yawRate) * k * 0.3;
+    // THE LONG FALL: nose comes down while the ground drops far below (hidden by the pitch),
+    // then free fall toward the father, the sea rushing up, ending just above the water facing him.
+    const t = (now - meltStart) / 1000;
+    const smooth = v => v * v * (3 - 2 * v);
+    viewAlt = meltAlt0 * Math.max(0, 1 - t / MELT_TIME);
+    const s = smooth(clamp((t - 0.3) / (FALL_TIME - 1), 0, 1));
+    view.x = lerp(meltX0, father.x - meltHx * 2.5, s);
+    travel = lerp(meltZ0, father.z - meltHz * 2.5, s);
+    if (t < FALL_UP) view.h = lerp(meltH0, FALL_H, smooth(t / FALL_UP));
+    else { const tt = t - FALL_UP; view.h = Math.max(0.25, FALL_H - 0.5 * FALL_G * tt * tt); }
+    const dx = father.x - view.x, dz = father.z - travel;
+    const lookPitch = clamp(Math.atan2(0.6 - view.h, Math.hypot(dx, dz)), -1.5, 0.9);
+    let dyaw = Math.atan2(dx, dz) - meltYaw0;
+    dyaw = Math.atan2(Math.sin(dyaw), Math.cos(dyaw));                // shortest way round
+    const blend = smooth(clamp(t / 1.6, 0, 1));
+    view.pitch = lerp(meltPitch0, lookPitch, blend);
+    view.yaw = meltYaw0 + dyaw * blend;
+    bank = Math.sin(t * 2.3) * 0.25 * (1 - t / FALL_TIME) * blend + Math.sin(t * 7) * 0.08 * (1 - blend);
+    yawRate = 0;
     focal += (FOCAL - focal) * k;
   } else {
     viewAlt = altitude;
@@ -287,6 +336,10 @@ function updateView(now, dt) {
     bank += (bankTarget - bank) * k;
     yawRate += (yawTarget - yawRate) * k;
     focal += (FOCAL / (1 + FOV_WIDEN * Math.max(0, thrust)) - focal) * k;   // wider view under thrust
+    // The father keeps his distance ahead, catching up slowly so your turns sweep him across the view
+    const kf = 1 - Math.exp(-dt / FATHER_FOLLOW);
+    father.x += (view.x + view.hx * FATHER_AHEAD - father.x) * kf;
+    father.z += (travel + view.hz * FATHER_AHEAD - father.z) * kf;
   }
   view.yaw += yawRate * dt;
   view.cy = Math.cos(view.yaw); view.sy = Math.sin(view.yaw);
@@ -351,6 +404,8 @@ function initAudio() {
     vib: ac.createOscillator(), vibDepth: ac.createGain(), pitchBus: ac.createGain(),
     // Engine: a low filtered saw that follows speed and thrust
     engine: ac.createOscillator(), engFilter: ac.createBiquadFilter(), engGain: ac.createGain(),
+    // Falling wind: looped noise through a bandpass, silent until the long fall
+    wind: ac.createBufferSource(), windFilter: ac.createBiquadFilter(), windGain: ac.createGain(),
     recDest: ac.createMediaStreamDestination(),
   };
   const n = node;
@@ -394,6 +449,18 @@ function initAudio() {
   n.engFilter.type = "lowpass"; n.engFilter.frequency.value = 400; n.engFilter.Q.value = 2;
   n.engGain.gain.value = 0;
   n.engine.connect(n.engFilter).connect(n.engGain).connect(n.master);
+
+  const noise = ac.createBuffer(2, ac.sampleRate * 2, ac.sampleRate);
+  for (let ch = 0; ch < 2; ch++) {
+    const d = noise.getChannelData(ch);
+    for (let i = 0; i < d.length; i++) d[i] = Math.random() * 2 - 1;
+  }
+  n.wind.buffer = noise; n.wind.loop = true;
+  n.windFilter.type = "bandpass"; n.windFilter.frequency.value = 300; n.windFilter.Q.value = 0.7;
+  n.windGain.gain.value = 0;
+  n.wind.connect(n.windFilter).connect(n.windGain).connect(n.master);
+  n.wind.start();
+
   n.master.connect(n.comp);
   n.comp.connect(ac.destination);
   n.comp.connect(n.recDest);
@@ -431,6 +498,7 @@ const voiceParams = a => [
   a.wet.gain, a.dry.gain, a.revSend.gain, a.hallSend.gain, a.vibDepth.gain,
   a.wobblePitch.gain, a.wobbleFilter.gain,
   a.engine.frequency, a.engFilter.frequency, a.engGain.gain,
+  a.windGain.gain, a.windFilter.frequency,
 ];
 // Before live control resumes (e.g. "Fly again"), clear any melt automation
 function releaseVoice() {
@@ -501,7 +569,6 @@ function meltVoice() {
   const a = audio, t = a.ac.currentTime, T = MELT_TIME;
   const hz = Math.max(40, a.osc1.frequency.value);
   const g0 = Math.max(0.02, a.amp.gain.value);
-  const hallNow = a.hallSend.gain.value;
   for (const p of voiceParams(a)) hold(p, t);
 
   // Pitch sweep (exponential = even in octaves)
@@ -528,8 +595,19 @@ function meltVoice() {
   a.engGain.gain.setTargetAtTime(0, t, T / 4);
   // (the hall send stays open so the fall rings out in the big space)
 
-  // Back to the sea: reset the voice while it's silent, then fade in quietly
-  const ts = t + T + 0.15;
+  // The long fall: nothing but wind, rising in level and pitch all the way down
+  a.windGain.gain.setValueAtTime(0.0001, t + 0.6);
+  a.windGain.gain.exponentialRampToValueAtTime(0.22, t + FALL_TIME - 0.2);
+  a.windFilter.frequency.setValueAtTime(250, t + 0.6);
+  a.windFilter.frequency.exponentialRampToValueAtTime(1600, t + FALL_TIME - 0.2);
+}
+
+// At the water: the wind cuts and the sea tone fades back in, quietly
+function seaReturn() {
+  const a = audio, ts = a.ac.currentTime;
+  for (const p of voiceParams(a)) hold(p, ts);
+  a.windGain.gain.setTargetAtTime(0, ts, 0.04);
+  const hallNow = a.hallSend.gain.value;
   a.osc1.frequency.setValueAtTime(ROOT_HZ, ts);
   a.osc2.frequency.setValueAtTime(ROOT_HZ, ts);
   a.sub.frequency.setValueAtTime(ROOT_HZ / 2, ts);
@@ -598,6 +676,8 @@ async function saveFlight() {
 // ============================================================
 function startFlight(now) {
   flight = { start: now };
+  flightOrigin = { x: view.x, z: travel, hx: view.hx, hz: view.hz };
+  ghostPath = []; lastGhostRec = 0;
   startRecording();
 }
 
@@ -607,6 +687,8 @@ function startMelt(now) {
   flight.flown = now - flight.start;
   meltSunR = sunRadius();
   meltAlt0 = altitude; meltPitch0 = view.pitch; meltH0 = view.h;
+  meltX0 = view.x; meltZ0 = travel; meltYaw0 = view.yaw; meltHx = view.hx; meltHz = view.hz;
+  lie = null; lieTextUntil = 0;       // all text goes silent
   meltVoice();
   // Every body dot breaks loose and falls under gravity
   falling = handPts.flat().map(p => ({
@@ -616,11 +698,13 @@ function startMelt(now) {
   trailHist = [];
 }
 
-// fromMelt: the quiet sea tone keeps playing under the results
+// fromMelt: the wind cuts and the quiet sea tone plays under the results
 async function endFlight(flownMs, fromMelt = false) {
   mode = "results";
-  if (!fromMelt) silence();
-  flight = null;
+  if (fromMelt) seaReturn(); else silence();
+  saveGhost(ghostPath);
+  ghostPath = [];
+  flight = null; flightOrigin = null;
   heat = 0;
   $("flew").textContent = (flownMs / 1000).toFixed(1) + "s";
   $("save").disabled = true;
@@ -758,15 +842,19 @@ function step(now, dt) {
     // Banking drifts the world sideways (camera slides along -right = (-hz, +hx))
     view.x -= bank * DRIFT * dt * view.hz;
     travel += bank * DRIFT * dt * view.hx;
+    view.x += view.hx * fwdSpeed * dt;
+    travel += view.hz * fwdSpeed * dt;
   }
-  view.x += view.hx * fwdSpeed * dt;
-  travel += view.hz * fwdSpeed * dt;
-  updateView(now, dt);
+  updateView(now, dt);                    // (during the long fall it places the camera itself)
   sunAim = sunAimNow();
+  updateFigures(dt);
 
   if (mode === "live") {
     const visible = hands.length > 0;
     spawnWax(dt);
+    spawnFigures(dt);
+    recordGhost(now);
+    updateLie(now, dt);
 
     // Heat builds only when you're up in the sun zone AND aiming at it
     // (faster the closer to dead centre); otherwise it cools
@@ -780,8 +868,8 @@ function step(now, dt) {
 
     updateVoice(visible);
   } else if (mode === "melt") {
-    if (now - meltStart > (MELT_TIME + SILENCE_TIME) * 1000) {
-      altitude = 0;                   // back to the sea
+    if (now - meltStart > FALL_TIME * 1000) {
+      altitude = 0;                   // in the water: cut to the results
       endFlight(flight.flown, true);
     }
   }
@@ -803,9 +891,11 @@ function sunState(now) {
     r = meltSunR * Math.pow(1 - u, 1.6); flare = 1 - u * 0.6;
   }
   const c = sunCam();
-  if (c[2] <= 0.05) return { x: 0, y: 0, r: 0, flare };     // behind you
+  if (c[2] <= 0.05) return { x: 0, y: 0, r: 0, flare, face: 0 };     // behind you
   const [x, y] = toScreen(c);
-  return { x, y, r, flare };
+  // Its face only resolves when you're very close
+  const face = mode === "melt" ? 0 : clamp((r / SUN_MAX_R - FACE_FROM) / (1 - FACE_FROM), 0, 1);
+  return { x, y, r, flare, face };
 }
 
 // The sun is a fixed direction in the world (world +z, SUN_ELEV up): turn away and it slides off
@@ -824,8 +914,16 @@ function sunAimNow() {
 // (far = dim + 1px, near = bright + 2px) and each bucket is stroked once.
 const wrap = (v, m) => ((v % m) + m) % m;
 const depthB = (z, far) => Math.pow(clamp(1 - z / far, 0, 1), 1.2);   // depth fade
-let wirePaths = [];
-function beginWire() { wirePaths = Array.from({ length: WIRE_LEVELS }, () => new Path2D()); }
+let wirePaths = [], dotPaths = [];
+function beginWire() {
+  wirePaths = Array.from({ length: WIRE_LEVELS }, () => new Path2D());
+  dotPaths = Array.from({ length: WIRE_LEVELS }, () => new Path2D());
+}
+// A red dot (for the falling figures), batched by brightness like the lines
+function wireDot(x, y, s, b) {
+  if (b <= 0.02) return;
+  dotPaths[wireLevel(b)].rect(x - s / 2, y - s / 2, s, s);
+}
 function wireLevel(b) { return Math.round(clamp(b, 0, 1) * (WIRE_LEVELS - 1)); }
 function wire(x1, y1, x2, y2, b) {
   if (b <= 0.02) return;
@@ -847,6 +945,11 @@ function flushWire() {
     ctx.globalAlpha = (0.12 + 0.88 * t) * flick;
     ctx.lineWidth = 1 + t;                        // 1px far → 2px near
     ctx.stroke(wirePaths[i]);
+  }
+  ctx.fillStyle = RED;
+  for (let i = 0; i < WIRE_LEVELS; i++) {
+    ctx.globalAlpha = (0.12 + 0.88 * (i / (WIRE_LEVELS - 1))) * flick;
+    ctx.fill(dotPaths[i]);
   }
   ctx.globalAlpha = 1;
 }
@@ -898,6 +1001,206 @@ function drawSun(now, s) {
     limb.push([s.x + Math.cos(a) * R * w, s.y + Math.sin(a) * R * w]);
   }
   wirePoly(limb, Math.min(1, base + 0.15));
+  if (s.face > 0.02) drawSunFace(s, now);
+}
+
+// The face: eyes, nose, mouth. Far off it's scattered fragments; very close, they pull together.
+function drawSunFace(s, now) {
+  const R = s.r, a = s.face, scatter = (1 - a) * R * 0.45, tw = now / 110;
+  const J = () => (Math.random() - 0.5) * (scatter + s.flare * s.flare * R * 0.02);
+  const P = (u, v) => [s.x + u * R + J(), s.y + v * R + J()];
+  const b = 0.25 + 0.75 * a;
+  for (const ex of [-0.32, 0.32]) {                                // eyes: narrow closed curves
+    const eye = [];
+    for (let i = 0; i <= 10; i++) {
+      const t = (i / 10) * Math.PI * 2;
+      eye.push(P(ex + Math.cos(t) * 0.13, -0.18 + Math.sin(t) * (0.05 + 0.02 * Math.sin(tw * 0.3))));
+    }
+    wirePoly(eye, b);
+  }
+  wirePoly([P(0, -0.1), P(0.05, 0.12), P(-0.03, 0.15)], b * 0.8);  // nose
+  const mouth = [];                                                // mouth: a slight downturn
+  for (let i = 0; i <= 10; i++) { const u = -0.3 + (i / 10) * 0.6; mouth.push(P(u, 0.42 - 0.06 * (1 - (u / 0.3) ** 2))); }   // corners lower
+  wirePoly(mouth, b);
+}
+
+// ---------- The sun lies: at high heat it briefly duplicates or drifts ----------
+function updateLie(now, dt) {
+  if (lie && now > lie.end) lie = null;
+  if (!lie && heat > LIE_HEAT && Math.random() < dt / LIE_EVERY) {
+    const dur = 700 + Math.random() * 600;
+    lie = { start: now, end: now + dur, kind: Math.random() < 0.5 ? "double" : "drift",
+            dx: (Math.random() < 0.5 ? -1 : 1) * (0.5 + Math.random() * 0.5), dy: (Math.random() - 0.5) * 0.6 };
+    lieTextUntil = now + dur + 900;
+  }
+}
+function drawSunWithLies(now, sun) {
+  if (!lie || sun.r < 2) { drawSun(now, sun); return; }
+  const u = clamp((now - lie.start) / (lie.end - lie.start), 0, 1), env = Math.sin(u * Math.PI);
+  if (lie.kind === "double") {
+    drawSun(now, sun);
+    drawSun(now, { ...sun, x: sun.x + lie.dx * sun.r * 1.4 * env, y: sun.y + lie.dy * sun.r * env, face: 0 });
+  } else {
+    drawSun(now, { ...sun, x: sun.x + lie.dx * sun.r * 1.2 * env, y: sun.y + lie.dy * sun.r * env });
+  }
+}
+
+// One line of text on the canvas (so it's in the saved video)
+function caption(text, a, y = H * 0.42) {
+  if (a <= 0.01) return;
+  ctx.save();
+  ctx.globalAlpha = clamp(a, 0, 1);
+  ctx.fillStyle = RED;
+  ctx.font = "300 34px system-ui, -apple-system, 'Segoe UI', Roboto, sans-serif";
+  ctx.textAlign = "center"; ctx.textBaseline = "middle";
+  ctx.fillText(text, W / 2, y);
+  ctx.restore();
+}
+
+// ---------- The ones before you: dot figures falling past; some climb beside you first ----------
+function spawnFigures(dt) {
+  const rate = lerp(FIG_RATE_LOW, FIG_RATE_HIGH, altitude * altitude);
+  if (figures.length >= FIG_MAX || Math.random() >= rate * dt) return;
+  const f = { t: 0, seed: Math.random() * 10, dropped: false };
+  if (Math.random() < FIG_CLIMBER) {        // still climbing beside you, for a few seconds
+    place(f, 3 + Math.random() * 3, side() * (2.5 + Math.random() * 1.5));
+    f.y = view.h + 0.3 + Math.random() * 0.6; f.vy = 0.4; f.climb = 3 + Math.random() * 2;
+    f.ang = 0; f.spin = 0;
+  } else {                                  // falling from above, tumbling
+    place(f, 8 + Math.random() * 16, side() * (1.5 + Math.random() * 8));
+    f.y = view.h + 7 + Math.random() * 4; f.vy = -1 - Math.random() * 2; f.climb = 0;
+    f.ang = Math.random() * 6.28; f.spin = (Math.random() - 0.5) * 4;
+  }
+  figures.push(f);
+}
+
+function updateFigures(dt) {
+  figures = figures.filter(f => {
+    f.t += dt;
+    if (f.climb > 0 && f.t < f.climb && mode === "live") {
+      f.x += view.hx * fwdSpeed * dt; f.z += view.hz * fwdSpeed * dt;   // keeps pace with you
+      f.y += f.vy * dt;
+    } else {
+      if (f.climb > 0 && !f.dropped) { f.dropped = true; f.vy = 0; f.spin = (Math.random() - 0.5) * 3; }
+      f.vy -= FIG_GRAVITY * dt; f.y += f.vy * dt; f.ang += f.spin * dt;
+    }
+    return f.y > -3 && f.t < 30;
+  });
+}
+
+// A body like yours was: head ring, torso, arms out, legs, as (u across, v up) points
+function figurePoints(f) {
+  const climbing = f.climb > 0 && !f.dropped;
+  const armLift = climbing ? Math.sin(f.t * 9) * 0.35 : 0.4 + Math.sin(f.t * 13 + f.seed) * 0.25;
+  const P = [];
+  for (let i = 0; i < 6; i++) { const a = (i / 6) * Math.PI * 2; P.push([Math.cos(a) * 0.14, 1.62 + Math.sin(a) * 0.14]); }
+  for (let i = 0; i <= 3; i++) P.push([0, 1.45 - i * 0.22]);
+  for (const sd of [-1, 1]) {
+    for (let i = 1; i <= 4; i++) P.push([sd * 0.2 * i, 1.38 + armLift * (i / 4)]);
+    for (let i = 1; i <= 4; i++) P.push([sd * 0.07 * i, 0.8 - 0.2 * i]);
+  }
+  return P;
+}
+
+function drawFigures() {
+  const rx = view.hz, rz = -view.hx;                 // billboard: faces you
+  for (const f of figures) {
+    const ca = Math.cos(f.ang), sa = Math.sin(f.ang);
+    for (const [u, v] of figurePoints(f)) {
+      const vv = v - 0.9, ur = u * ca - vv * sa, vr = u * sa + vv * ca;   // tumble about the waist
+      const c = toCam(f.x + rx * ur, f.y + vr, f.z + rz * ur);
+      if (c[2] < NEAR) continue;
+      const [sx, sy] = toScreen(c);
+      wireDot(sx, sy, clamp(60 / c[2], 1.5, 7), 0.15 + 0.85 * depthB(c[2], VIEW_FAR * 1.3));
+    }
+  }
+}
+
+// ---------- Your ghosts: past flights as faint trails in world space ----------
+function loadGhosts() {
+  try {
+    const g = JSON.parse(localStorage.getItem(GHOST_KEY) || "[]");
+    return Array.isArray(g) ? g.filter(p => Array.isArray(p) && p.length >= 6).slice(-GHOST_MAX) : [];
+  } catch (e) { console.warn("Couldn't read ghosts", e); return []; }
+}
+function saveGhost(path) {
+  if (path.length < 6) return;
+  ghosts.push(path);
+  while (ghosts.length > GHOST_MAX) ghosts.shift();
+  try { localStorage.setItem(GHOST_KEY, JSON.stringify(ghosts)); }
+  catch (e) { console.warn("Couldn't save ghosts", e); }
+}
+// A few points per second, relative to where (and which way) this flight took off
+function recordGhost(now) {
+  if (!flight || !flightOrigin || now - lastGhostRec < GHOST_STEP || ghostPath.length >= GHOST_POINTS * 3) return;
+  lastGhostRec = now;
+  const o = flightOrigin, dx = view.x - o.x, dz = travel - o.z;
+  const r2 = v => Math.round(v * 100) / 100;
+  ghostPath.push(r2(dx * o.hx + dz * o.hz), r2(dx * o.hz - dz * o.hx), r2(view.h));
+}
+function drawGhosts() {
+  if (!ghosts.length) return;
+  // Laid out from this flight's take-off; before take-off, from where you are now
+  const o = flightOrigin || { x: view.x, z: travel, hx: view.hx, hz: view.hz };
+  const far = VIEW_FAR * 1.3;
+  ghosts.forEach((g, gi) => {
+    const age = 0.45 + 0.55 * ((gi + 1) / ghosts.length);     // older flights fainter
+    let px = 0, pz = 0, py = 0, has = false;
+    for (let i = 0; i + 2 < g.length; i += 3) {
+      const f = g[i], l = g[i + 1];
+      const x = o.x + o.hx * f + o.hz * l, z = o.z + o.hz * f - o.hx * l, y = g[i + 2];
+      if (has) {
+        const mx = (x + px) / 2, mz = (z + pz) / 2;
+        const d = Math.hypot(mx - view.x, mz - travel);
+        if (d < far && fwdOf(mx, mz) > -2) seg3(px, py, pz, x, y, z, 0.22 * age * (0.3 + 0.7 * depthB(d, far)));
+      }
+      px = x; pz = z; py = y; has = true;
+    }
+  });
+}
+
+// ---------- The father: a tiny wire figure on the ground; shrinks as you climb ----------
+function drawFather() {
+  const sky = clamp((viewAlt - SEA_LINE) / (1 - SEA_LINE), 0, 1);
+  const sc = mode === "melt" ? 1 : lerp(1, 0.4, sky);
+  const rx = view.hz, rz = -view.hx, fx = father.x, fz = father.z;
+  const d = Math.hypot(fx - view.x, fz - travel);
+  const b = 0.35 + 0.6 * depthB(d, VIEW_FAR * 1.5);
+  const L = (u1, v1, u2, v2) => seg3(fx + rx * u1 * sc, v1 * sc, fz + rz * u1 * sc, fx + rx * u2 * sc, v2 * sc, fz + rz * u2 * sc, b);
+  for (let i = 0; i < 6; i++) {                     // head, tipped back a little: looking up
+    const a1 = (i / 6) * Math.PI * 2, a2 = ((i + 1) / 6) * Math.PI * 2;
+    L(Math.cos(a1) * 0.09, 1.0 + Math.sin(a1) * 0.09, Math.cos(a2) * 0.09, 1.0 + Math.sin(a2) * 0.09);
+  }
+  L(0, 0.9, 0, 0.5);                                 // body
+  L(0, 0.82, -0.18, 0.58); L(0, 0.82, 0.18, 0.58);   // arms at his sides
+  L(0, 0.5, -0.1, 0); L(0, 0.5, 0.1, 0);             // legs
+  if (mode === "melt") {                             // standing on a rock in the sea
+    const rock = [];
+    for (let i = 0; i <= 9; i++) {
+      const a = (i / 9) * Math.PI * 2, r = 0.7 + 0.2 * Math.sin(i * 2.7);
+      rock.push([fx + Math.cos(a) * r, 0.05, fz + Math.sin(a) * r]);
+    }
+    for (let i = 1; i < rock.length; i++) seg3(...rock[i - 1], ...rock[i], b * 0.8);
+  }
+}
+
+// ---------- The sea, rushing up during the long fall ----------
+function drawSea(now, amt) {
+  const t = now / 1000;
+  const cx = Math.round(father.x / SEA_SPACING) * SEA_SPACING, cz = Math.round(father.z / SEA_SPACING) * SEA_SPACING;
+  const step = 6, far = SEA_HALF * 1.2;
+  for (let k = 0; k < SEA_LINES; k++) {
+    const z = cz - SEA_HALF + k * SEA_SPACING;
+    let px = 0, py = 0, has = false;
+    for (let x = cx - SEA_HALF; x <= cx + SEA_HALF; x += step) {
+      const y = 0.12 * Math.sin(x * 0.45 + t * 1.8 + k * 0.9);
+      if (has) {
+        const d = Math.hypot((x + px) / 2 - view.x, z - travel);
+        seg3(px, py, z, x, y, z, amt * (0.2 + 0.7 * depthB(d, far)));
+      }
+      px = x; py = y; has = true;
+    }
+  }
 }
 
 // ---------- Horizon: the line at infinity, tilted by pitch and roll ----------
@@ -1007,13 +1310,22 @@ function drawSpeedLines() {
 // The whole world, in one batched stroke pass, then scanlines
 function drawWorld(now, dt, sun) {
   beginWire();
-  drawGround();
+  // During the long fall the land gives way to the sea once the nose is down
+  const fallT = mode === "melt" ? (now - meltStart) / 1000 : -1;
+  const land = fallT < FALL_UP * 0.8;
+  if (land) {
+    drawGround();
+    drawMountains();
+    drawTowers();
+    drawClouds();
+    drawSpeedLines();
+  }
+  if (fallT >= FALL_UP * 0.5) drawSea(now, clamp((fallT - FALL_UP * 0.5) / 0.6, 0, 1));
   drawHorizon();
-  drawMountains();
-  drawTowers();
-  drawClouds();
-  drawSpeedLines();
-  drawSun(now, sun);
+  drawGhosts();
+  drawFather();
+  drawFigures();
+  drawSunWithLies(now, sun);
   flushWire();
   drawScanlines();
 }
@@ -1105,6 +1417,8 @@ function render(now, dt) {
     drawWax(dt);
     drawFeathers(dt);
     drawFalling(dt, t);
+    // Just before the water, one line
+    if (t >= FALL_TEXT_AT) caption("he also flew.", (t - FALL_TEXT_AT) / 0.5);
     return;
   }
 
@@ -1112,6 +1426,7 @@ function render(now, dt) {
   drawWax(dt);
   drawFeathers(dt);
   drawHands();                        // last: always visible inside the glow
+  if (mode === "live" && now < lieTextUntil) caption("that's not the sun", Math.min(1, (lieTextUntil - now) / 600), H * 0.6);
 }
 
 // ============================================================
@@ -1191,7 +1506,8 @@ $("save").onclick = saveFlight;
 $("again").onclick = () => {
   $("results").classList.add("hidden");
   altitude = 0; heat = 0;
-  falling = []; wax = []; feathers = []; trailHist = [];
+  falling = []; wax = []; feathers = []; trailHist = []; figures = [];
+  lie = null; lieTextUntil = 0;
   sizeSamples = 0; thrust = thrustTarget = 0;   // relearn neutral hand size for thrust
   releaseVoice();                     // drop any leftover melt automation
   lastHandTime = performance.now();
