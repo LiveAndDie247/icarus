@@ -54,7 +54,7 @@
 </div>
 
 <script type="module">
-import { FilesetResolver, HandLandmarker, FaceLandmarker }
+import { FilesetResolver, HandLandmarker }
   from "https://cdn.jsdelivr.net/npm/@mediapipe/tasks-vision@0.10.14/vision_bundle.mjs";
 
 // ============================================================
@@ -62,7 +62,6 @@ import { FilesetResolver, HandLandmarker, FaceLandmarker }
 // ============================================================
 const WASM_URL   = "https://cdn.jsdelivr.net/npm/@mediapipe/tasks-vision@0.10.14/wasm";
 const HAND_MODEL = "https://storage.googleapis.com/mediapipe-models/hand_landmarker/hand_landmarker/float16/1/hand_landmarker.task";
-const FACE_MODEL = "https://storage.googleapis.com/mediapipe-models/face_landmarker/face_landmarker/float16/1/face_landmarker.task";
 
 // Zones (altitude: 0 = bottom of frame, 1 = top)
 const SEA_LINE = 0.30;        // below this: the sea
@@ -89,31 +88,29 @@ const SEA_AFTER_GAIN = 0.08;  // quiet sea tone that returns after the fall
 
 // Canvas
 const W = 720, H = 1280;
-const HORIZON_Y = H * (1 - SEA_LINE);
-const SUN_X = W / 2, SUN_Y = 150;
-const SUN_MIN_R = 60;
+const SUN_MIN_R = 50;
 const SUN_MAX_R = H * 0.2 / 1.12;     // sphere ≈ 40% of the frame at most (incl. heat warp)
 
-// World: red wireframe vectors on black. The sun is the vanishing point.
-// Screen = VP + (world - camera) * FOCAL / z
+// First-person flight. World axes: x right, y up (ground at 0), z forward.
+// Red wireframe vectors on black.
 const RED = "rgb(255, 0, 0)";
-const FOCAL = 560;                    // px per world unit at z = 1
-const CLIMB_Y = 1.2;                  // camera rises this many world units over full altitude
-const HEAD_CAM = 0.18;                // head parallax: camera shift (world units) at full head offset
-const HEAD_VP = 14;                   // head parallax: vanishing-point shift (px)
-const HORIZON_DROP = 170;             // px the horizon falls as you climb from the sea line to the top
-const HORIZON_BEND = 42;              // px the horizon bows at the edges at the very top
-const TUNNEL_N = 12, TUNNEL_GAP = 0.6, TUNNEL_Z0 = 0.3;   // rectangles stacked toward the sun
-const TUNNEL_RX = 1.1, TUNNEL_RY = 1.9;                   // rectangle half-size, world units
-const GRID_COLS = 15, GRID_ROWS = 10; // floor grid
-const GRID_X = 0.9, GRID_Z0 = 0.5;    // column spacing, nearest row depth (row spacing = 1)
-const SCENERY_NEAR = 0.35, SCENERY_FAR = 9;               // mountains / clouds depth range
-const MOUNTAIN_N = 6, CLOUD_N = 5;
-const SPEED_N = 50;                   // speed lines
-const SPEED_NEAR = 0.25, SPEED_FAR = 7, SPEED_SPAWN_Z = 1.6;
+const FOCAL = 560;                    // px per world unit at distance 1
+const NEAR = 0.15;                    // near clip plane
+const PITCH_MAX = Math.atan((H / 2 - 60) / FOCAL);   // near the sun the horizon sits at the bottom edge
+const CAM_H_SEA = 0.45, CAM_H_TOP = 4.5;             // eye height over the ground
+const SPEED_BASE = 4, SPEED_ALT = 10;                // forward speed when hovering, + extra at the top
+const BANK_MAX = 0.5;                 // radians of roll at full hand-height difference
+const DRIFT = 7;                      // sideways world units / s per radian of bank
+const SUN_ELEV = 41 * Math.PI / 180;  // the sun: straight ahead, this far above the horizon
+const MELT_PITCH = -0.55, MELT_H = 0.08;             // the fall: nose down, ground rushes up
+const GRID = 1.5, GRID_ROWS = 24, GRID_HALF = 16;    // ground grid
+const VIEW_FAR = GRID * GRID_ROWS;    // depth-fade distance
+const MOUNTAIN_N = 8, TOWER_N = 5, CLOUD_N = 4, SPEED_N = 50;
+const CLOUD_SPLIT = 5;                // clouds start parting this far ahead
 const WIRE_LEVELS = 8;                // brightness buckets for batched line drawing
 
-// Body particles: trails 4×42 + hands 42 + face ~130 + feathers 50 + wax 110 ≈ 500
+// Body: the hands, drawn big at the bottom corners like fists out ahead
+const HAND_SPAN = 190;                // px from wrist to middle knuckle when drawn
 const TRAIL_FRAMES = 4;               // hand trail length, in detection frames
 const FEATHER_CAP = 50;
 const WAX_CAP = 110;
@@ -129,7 +126,7 @@ const $ = id => document.getElementById(id);
 const canvas = $("canvas"), ctx = canvas.getContext("2d");
 const video = $("video");
 
-let handLm = null, faceLm = null;
+let handLm = null;
 let audio = null;
 let recStream = null, recorder = null, chunks = [];
 let lastBlob = null;
@@ -138,55 +135,31 @@ let mode = "intro";           // intro | live | melt | results
 let altitude = 0;             // smoothed 0..1
 let heat = 0;                 // 0..1
 let hands = [];               // arrays of 21 landmarks
-let face = null;              // 478 landmarks or null
 let lastHandTime = 0;
 let flight = null;            // { start } while a flight is in progress
 let meltStart = 0, meltSunR = 0;
 let lastVideoTime = -1, frameNo = 0, lastFrame = performance.now();
 
-// 3D view state (updated every frame in updateView)
-const vp = { x: SUN_X, y: SUN_Y };    // vanishing point = the sun
-const cam = { x: 0, y: 0 };           // camera offset in world units
+// Camera (updated every frame in updateView). pitch > 0 looks up; roll > 0 = banked left.
+const view = { x: 0, h: CAM_H_SEA, pitch: 0, roll: 0, cp: 1, sp: 0, cr: 1, sr: 0 };
 let viewAlt = 0;                      // altitude the camera shows (falls during the melt)
-let horizonY = HORIZON_Y;             // current horizon height at the vanishing point
-let headX = 0, headY = 0;             // smoothed head offset, -1..1
-let meltAlt0 = 0;
-let gridScroll = 0;                   // floor grid travel, in rows
-let tunnelScroll = 0;                 // tunnel travel, in rectangles
-let fwdSpeed = 0, fwdTarget = 0;      // world units / s, positive = toward the camera (toward the sun)
+let travel = 0;                       // distance flown: the camera's world z
+let fwdSpeed = SPEED_BASE;            // world units / s, always forward
+let bank = 0, bankTarget = 0;         // roll from the hands' height difference
+let meltAlt0 = 0, meltPitch0 = 0, meltH0 = CAM_H_SEA;
 
-// Wire scenery, all moving through depth
-const speedLines = Array.from({ length: SPEED_N }, () => {
-  const p = { x: 0, y: 0, z: 0 };
-  spawnSpeed(p, SPEED_NEAR + Math.random() * (SPEED_FAR - SPEED_NEAR));
-  return p;
-});
-const mountains = Array.from({ length: MOUNTAIN_N }, (_, i) =>
-  spawnMountain({}, SCENERY_NEAR + 1 + Math.random() * (SCENERY_FAR - SCENERY_NEAR - 1), i % 2));
-const cloudShapes = Array.from({ length: CLOUD_N }, (_, i) =>
-  spawnCloud({}, SCENERY_NEAR + 1 + Math.random() * (SCENERY_FAR - SCENERY_NEAR - 1), i % 2));
+// Wire scenery in world coordinates (distance ahead = z - travel)
+const mountains = Array.from({ length: MOUNTAIN_N }, () => spawnMountain({}, 6 + Math.random() * 34));
+const towers = Array.from({ length: TOWER_N }, () => spawnTower({}, 4 + Math.random() * 30));
+const cloudShapes = Array.from({ length: CLOUD_N }, (_, i) => spawnCloud({}, 8 + i * 8 + Math.random() * 4));
+const speedLines = Array.from({ length: SPEED_N }, () => spawnSpeed({}, 1 + Math.random() * 20));
+
 let climb = 0, prevAlt = 0;           // smoothed climb rate, altitude units / s
-let handPts = [], prevHandPts = [];   // hand landmarks mapped to the canvas
+let rawPts = [], prevRawPts = [];     // hand landmarks mapped to the canvas (where the camera sees them)
+let handPts = [];                     // the same hands, drawn big at the bottom corners
 let trailHist = [];                   // last few frames of handPts
 let lastDetect = 0;
 let feathers = [], wax = [], falling = [];
-
-// Face: landmark features only, each with its own brightness
-const FACE_DOTS = (() => {
-  const idx = key => (FaceLandmarker[key] ?? []).flatMap(c => [c.start, c.end]);
-  const m = new Map();
-  const add = (list, alpha, size) => {
-    for (const i of list) if (!m.has(i) || m.get(i).alpha < alpha) m.set(i, { i, alpha, size });
-  };
-  add(idx("FACE_LANDMARKS_FACE_OVAL"), 0.22, 1.2);       // dimmest
-  add([6, 197, 195, 5, 4, 1], 0.5, 1.4);                 // sparse nose line
-  add(idx("FACE_LANDMARKS_LEFT_EYEBROW"), 0.6, 1.4);
-  add(idx("FACE_LANDMARKS_RIGHT_EYEBROW"), 0.6, 1.4);
-  add(idx("FACE_LANDMARKS_LEFT_EYE"), 1, 1.8);           // brightest
-  add(idx("FACE_LANDMARKS_RIGHT_EYE"), 1, 1.8);
-  add(idx("FACE_LANDMARKS_LIPS"), 1, 1.8);
-  return [...m.values()].sort((a, b) => a.alpha - b.alpha);
-})();
 
 const clamp = (v, a, b) => Math.min(b, Math.max(a, v));
 const lerp = (a, b, t) => a + (b - a) * t;
@@ -195,32 +168,15 @@ const lerp = (a, b, t) => a + (b - a) * t;
 // 3D helpers (function declarations: hoisted, used during init)
 // ============================================================
 
-// Perspective projection toward the vanishing point (the sun)
-function projX(x, z) { return vp.x + (x - cam.x) * FOCAL / z; }
-function projY(y, z) { return vp.y + (y - cam.y) * FOCAL / z; }
+// ---------- Scenery spawners (placed `ahead` units in front of the camera) ----------
+function side() { return Math.random() < 0.5 ? -1 : 1; }   // hoisted: used during init
 
-// Speed line origin at depth z, inside a box that fills the frame at SPEED_SPAWN_Z.
-// Far ones therefore sit near the sun; near ones spill past the edges.
-function spawnSpeed(p, z) {
-  const k = SPEED_SPAWN_Z / FOCAL;
-  p.z = z;
-  p.x = cam.x + (Math.random() * W * 1.2 - W * 0.1 - vp.x) * k;
-  p.y = cam.y + (Math.random() * H * 1.2 - H * 0.1 - vp.y) * k;
-}
-
-// Screen x at the sides (left or right third, spilling past the edge) → world x at depth z
-function sideX(z, side) {
-  const sx = side ? W * (0.7 + Math.random() * 0.45) : W * (-0.15 + Math.random() * 0.45);
-  return cam.x + (sx - vp.x) * z / FOCAL;
-}
-
-// Jagged mountain: profile of (u 0..1 across, h 0..1 up), sized in screen px at its spawn depth
-function spawnMountain(m, z, side = Math.random() < 0.5 ? 0 : 1) {
-  const k = z / FOCAL;
-  m.z = z;
-  m.w = (160 + Math.random() * 200) * k;
-  m.h = (60 + Math.random() * 120) * k;
-  m.x = sideX(z, side) - m.w / 2;
+// Jagged mountain ridge at the side: profile of (u 0..1 across, h 0..1 up)
+function spawnMountain(m, ahead) {
+  m.z = travel + ahead;
+  m.w = 4 + Math.random() * 7;
+  m.h = 1.5 + Math.random() * 4.5;
+  m.x = view.x + side() * (5 + Math.random() * 16) - m.w / 2;
   const n = 7 + ((Math.random() * 5) | 0), peak = 1 + ((Math.random() * (n - 2)) | 0);
   m.prof = [];
   for (let i = 0; i <= n; i++) {
@@ -230,56 +186,84 @@ function spawnMountain(m, z, side = Math.random() < 0.5 ? 0 : 1) {
   return m;
 }
 
-// Jagged cloud: closed outline around an ellipse with a flattish bottom
-function spawnCloud(c, z, side = Math.random() < 0.5 ? 0 : 1) {
-  const k = z / FOCAL;
-  c.z = z;
-  c.x = sideX(z, side);
-  const sy = vp.y - 40 + Math.random() * Math.max(60, horizonY - vp.y - 160);   // in the sky
-  c.y = cam.y + (sy - vp.y) * k;
-  const rx = (60 + Math.random() * 90) * k, ry = rx * (0.25 + Math.random() * 0.12);
+// Lattice tower, some close enough to pass right beside you
+function spawnTower(t, ahead) {
+  t.z = travel + ahead;
+  t.x = view.x + side() * (1.5 + Math.random() * 9);
+  t.h = 2 + Math.random() * 3.5;
+  t.levels = 4 + ((Math.random() * 3) | 0);
+  return t;
+}
+
+// Jagged cloud outline at eye level (yRel = height relative to the camera), flattish bottom
+function spawnCloud(c, ahead) {
+  c.z = travel + ahead;
+  c.x = view.x + (Math.random() - 0.5) * 5;
+  c.yRel = -0.3 + Math.random() * 0.8;
+  const rx = 1.5 + Math.random() * 1.5, ry = rx * (0.3 + Math.random() * 0.15);
   c.pts = [];
-  const n = 14;
+  const n = 16;                       // index 0 = right, n/4 = top, n/2 = left, 3n/4 = bottom
   for (let i = 0; i < n; i++) {
-    const a = (i / n) * Math.PI * 2, j = 0.75 + Math.random() * 0.5;
-    c.pts.push([Math.cos(a) * rx * j, Math.min(Math.sin(a) * ry * j, ry * 0.35)]);
+    const a = (i / n) * Math.PI * 2, j = 0.8 + Math.random() * 0.4;
+    c.pts.push([Math.cos(a) * rx * j, Math.max(Math.sin(a) * ry * j, -ry * 0.35)]);
   }
   return c;
 }
 
-// Horizon height at screen x: drops with altitude, bows at the edges up high
-function horizonAt(x) {
-  const high = clamp((viewAlt - 0.6) / 0.4, 0, 1);
-  const u = (x - vp.x) / (W / 2);
-  return horizonY + HORIZON_BEND * high * high * u * u;
+function spawnSpeed(p, ahead) {
+  p.z = travel + ahead;
+  p.x = view.x + (Math.random() - 0.5) * 10;
+  p.y = Math.max(0.05, view.h + (Math.random() - 0.5) * 6);
+  return p;
 }
 
-// Per-frame camera: altitude (or the fall), head parallax, horizon
+// ---------- Camera projection ----------
+// World point → camera space [x, y, depth] (pitch applied), then roll on screen.
+function toCam(x, y, z) {
+  const dx = x - view.x, dy = y - view.h, dz = z - travel;
+  return [dx, dy * view.cp - dz * view.sp, dy * view.sp + dz * view.cp];
+}
+function dirCam(dx, dy, dz) {          // a direction (point at infinity)
+  return [dx, dy * view.cp - dz * view.sp, dy * view.sp + dz * view.cp];
+}
+function toScreen(c) {
+  const k = FOCAL / c[2], sx = c[0] * k, sy = -c[1] * k;
+  return [W / 2 + sx * view.cr - sy * view.sr, H / 2 + sx * view.sr + sy * view.cr];
+}
+function clipNear(a, b) {
+  const t = (NEAR - a[2]) / (b[2] - a[2]);
+  return [a[0] + (b[0] - a[0]) * t, a[1] + (b[1] - a[1]) * t, NEAR];
+}
+// One 3D line segment, clipped to the near plane, into the wire batch
+function seg3(x1, y1, z1, x2, y2, z2, b) {
+  if (b <= 0.02) return;
+  let a = toCam(x1, y1, z1), c = toCam(x2, y2, z2);
+  if (a[2] < NEAR && c[2] < NEAR) return;
+  if (a[2] < NEAR) a = clipNear(a, c); else if (c[2] < NEAR) c = clipNear(c, a);
+  const p = toScreen(a), q = toScreen(c);
+  wire(p[0], p[1], q[0], q[1], b);
+}
+
+// Per-frame camera: altitude pitches it up and lifts it; the hands bank it; the melt dives it
 function updateView(now, dt) {
+  const k = clamp(dt * 4, 0, 1);
   if (mode === "melt") {
-    const u = clamp((now - meltStart) / 1000 / MELT_TIME, 0, 1);
-    viewAlt = meltAlt0 * (1 - u * u);           // the camera falls back to the sea
+    const u = clamp((now - meltStart) / 1000 / MELT_TIME, 0, 1), e = u * u;
+    viewAlt = meltAlt0 * (1 - e);
+    view.pitch = lerp(meltPitch0, MELT_PITCH, Math.min(1, u * 1.6));   // nose down
+    view.h = lerp(meltH0, MELT_H, e);                                  // ground rushes up
+    bank += (Math.sin(u * 9) * 0.3 * u - bank) * k;                    // tumbling wobble
   } else {
     viewAlt = altitude;
+    const sky = clamp((viewAlt - SEA_LINE) / (1 - SEA_LINE), 0, 1);
+    const ease = sky * sky * (3 - 2 * sky);
+    view.pitch += (PITCH_MAX * ease - view.pitch) * k;
+    view.h += (lerp(CAM_H_SEA, CAM_H_TOP, Math.pow(sky, 1.2)) - view.h) * k;
+    bank += (bankTarget - bank) * k;
   }
-
-  // Head parallax from the nose tip; eases back to centre without a face
-  let tx = 0, ty = 0;
-  if (face && face[1] && mode !== "melt") {
-    const p = mapper()(face[1]);
-    tx = clamp((p.x - W / 2) / (W / 2), -1, 1);
-    ty = clamp((p.y - H * 0.4) / (H / 2), -1, 1);
-  }
-  const k = clamp(dt * 4, 0, 1);
-  headX += (tx - headX) * k; headY += (ty - headY) * k;
-
-  vp.x = SUN_X - headX * HEAD_VP;
-  vp.y = SUN_Y - headY * HEAD_VP * 0.7;
-  cam.x = headX * HEAD_CAM;
-  cam.y = -viewAlt * CLIMB_Y + headY * HEAD_CAM * 0.7;
-
-  const sky = clamp((viewAlt - SEA_LINE) / (1 - SEA_LINE), 0, 1);
-  horizonY = HORIZON_Y + HORIZON_DROP * Math.pow(sky, 1.2) - headY * HEAD_VP * 0.7;
+  view.roll = bank;
+  view.cp = Math.cos(view.pitch); view.sp = Math.sin(view.pitch);
+  view.cr = Math.cos(view.roll);  view.sr = Math.sin(view.roll);
 }
 
 // ============================================================
@@ -575,13 +559,12 @@ function startMelt(now) {
   meltStart = now;
   flight.flown = now - flight.start;
   meltSunR = sunRadius();
-  meltAlt0 = altitude;
+  meltAlt0 = altitude; meltPitch0 = view.pitch; meltH0 = view.h;
   meltVoice();
   // Every body dot breaks loose and falls under gravity
-  falling = currentDots().map(d => ({
-    x: d.x, y: d.y, size: d.kind === "hand" ? 4 : d.size + 0.6,
-    c: d.kind === "hand" ? HAND_BLUE : d.color, a: d.alpha,
-    vx: (Math.random() - 0.5) * 120, vy: -Math.random() * 140,
+  falling = handPts.flat().map(p => ({
+    x: p.x, y: p.y, size: 6, c: HAND_BLUE, a: 1,
+    vx: (Math.random() - 0.5) * 160, vy: -Math.random() * 260,
   }));
   trailHist = [];
 }
@@ -611,36 +594,58 @@ function mapper() {
   return p => ({ x: ox + (1 - p.x) * vw * s, y: oy + p.y * vh * s });
 }
 
+// The hands as you'd see your own fists flying: each one scaled up and anchored
+// at a bottom corner (screen-left hand → left corner), keeping its live shape.
+// Output keeps the detector's order so indices match rawPts.
+function bigHands(raw) {
+  if (!raw.length) return [];
+  const meanY = raw.reduce((s, pts) => s + pts[0].y, 0) / raw.length;
+  const leftIdx = raw.length === 2 ? (raw[0][0].x < raw[1][0].x ? 0 : 1) : -1;
+  return raw.map((pts, i) => {
+    const left = leftIdx >= 0 ? i === leftIdx : pts[0].x < W / 2;
+    const ax = left ? W * 0.2 : W * 0.8;
+    const ay = H - 70 + (pts[0].y - meanY) * 0.5;          // the higher hand sits a little higher
+    const span = Math.hypot(pts[9].x - pts[0].x, pts[9].y - pts[0].y) || 1;
+    const s = HAND_SPAN / span;
+    return pts.map(p => ({ x: ax + (p.x - pts[0].x) * s, y: ay + (p.y - pts[0].y) * s }));
+  });
+}
+
 function detect(now) {
   const res = handLm.detectForVideo(video, now);
   hands = res.landmarks || [];
 
-  // Face every other frame keeps mobile frame rates up (visuals only)
-  if (faceLm && frameNo % 2 === 0) {
-    face = faceLm.detectForVideo(video, now).faceLandmarks?.[0] ?? null;
-  }
-
-  // Hand landmarks on the canvas, plus a short history for trails
+  // Hands on the canvas (for motion + banking) and drawn big (for display), plus trails
   const map = mapper();
-  prevHandPts = handPts;
-  handPts = hands.map(lm => lm.map(map));
+  prevRawPts = rawPts;
+  rawPts = hands.map(lm => lm.map(map));
+  handPts = bigHands(rawPts);
   trailHist.push(handPts);
   if (trailHist.length > TRAIL_FRAMES + 1) trailHist.shift();
 
-  // Feathers: fast hand motion sheds a few white specks
+  // Bank: height difference between the hands. Screen-left hand lower → bank left.
+  if (rawPts.length === 2) {
+    const [l, r] = rawPts[0][0].x < rawPts[1][0].x ? rawPts : [rawPts[1], rawPts[0]];
+    bankTarget = clamp((l[0].y - r[0].y) / (H * 0.35), -1, 1) * BANK_MAX;
+  } else {
+    bankTarget = 0;
+  }
+
+  // Feathers: fast hand motion (measured on the real hands) sheds a few white specks off the big ones
   const dtDet = (now - lastDetect) / 1000;
   lastDetect = now;
   if (mode === "live" && dtDet > 0 && dtDet < 0.15) {
-    handPts.forEach((pts, h) => {
-      const prev = prevHandPts[h];
+    rawPts.forEach((pts, h) => {
+      const prev = prevRawPts[h];
       if (!prev) return;
       pts.forEach((p, j) => {
         const q = prev[j], dx = p.x - q.x, dy = p.y - q.y, d = Math.hypot(dx, dy);
         if (d > 260) return;                      // hand swap, not motion
         const speed = d / dtDet;
         if (speed > 1400 && feathers.length < FEATHER_CAP && Math.random() < Math.min(0.035, (speed - 1400) / 20000)) {
+          const b = handPts[h][j];
           feathers.push({
-            x: p.x, y: p.y, vx: dx / dtDet * 0.06 + (Math.random() - 0.5) * 30, vy: dy / dtDet * 0.04,
+            x: b.x, y: b.y, vx: dx / dtDet * 0.06 + (Math.random() - 0.5) * 30, vy: dy / dtDet * 0.04,
             ph: Math.random() * 6.28, life: 0, max: 1.4 + Math.random() * 1.2, size: 1.4 + Math.random() * 1.2,
           });
         }
@@ -664,16 +669,13 @@ function step(now, dt) {
   if (dt > 0) climb += ((altitude - prevAlt) / dt - climb) * clamp(dt * 6, 0, 1);
   prevAlt = altitude;
 
-  // Forward speed (toward the sun): slow base drift that grows with altitude,
-  // plus the climb rate. The fall throws everything back the other way.
-  if (mode === "melt") {
-    const t = (now - meltStart) / 1000;
-    fwdTarget = t < MELT_TIME ? -6 : 0.1;
-  } else {
-    // Mostly the climb rate; a small drift keeps the world from freezing
-    fwdTarget = 0.1 + altitude * 0.25 + (hands.length ? Math.max(0, climb) * 6 : 0);
+  // Always flying forward: base speed when hovering, faster with altitude.
+  // During the melt you keep your momentum while the camera dives.
+  if (mode !== "melt") {
+    fwdSpeed += (SPEED_BASE + SPEED_ALT * altitude - fwdSpeed) * clamp(dt * 3, 0, 1);
+    view.x -= bank * DRIFT * dt;          // banking drifts the world sideways
   }
-  fwdSpeed += (fwdTarget - fwdSpeed) * clamp(dt * 5, 0, 1);
+  travel += fwdSpeed * dt;
   updateView(now, dt);
 
   if (mode === "live") {
@@ -701,44 +703,28 @@ function step(now, dt) {
 // ============================================================
 // Rendering: black, dots only, sun, horizon
 // ============================================================
-const SEA_DOT = "rgb(120, 165, 255)";
-const hotColor = () => `rgb(255, ${Math.round(lerp(255, 70, heat))}, ${Math.round(lerp(255, 40, heat))})`;
-
-// Every body dot (hands + face features), used when they all fall at the melt
-function currentDots() {
-  const dots = [], hot = hotColor();
-  for (const pts of handPts) for (const p of pts) dots.push({ x: p.x, y: p.y, size: 4, kind: "hand", alpha: 1 });
-  if (face) {
-    const map = mapper();
-    for (const f of FACE_DOTS) {
-      const lm = face[f.i];
-      if (!lm) continue;
-      const p = map(lm);
-      dots.push({ x: p.x, y: p.y, size: f.size, kind: "face", alpha: f.alpha, color: p.y > horizonAt(p.x) ? SEA_DOT : hot });
-    }
-  }
-  return dots;
-}
-
-// ---------- Sun ----------
+// ---------- Sun: ahead and above; you approach it (it grows) as you climb ----------
 function sunRadius() {
   return lerp(SUN_MIN_R, SUN_MAX_R, clamp(altitude * 0.75 + heat * 0.25, 0, 1));
 }
 
 function sunState(now) {
+  let r = sunRadius(), flare = heat;
   if (mode === "melt") {
-    // Shrinks away upward over the fall
+    // Shrinks away; the dive pitches it up and out of the frame
     const u = clamp((now - meltStart) / 1000 / MELT_TIME, 0, 1);
-    return { x: vp.x, y: vp.y - 280 * u * u, r: meltSunR * Math.pow(1 - u, 1.6), flare: 1 - u * 0.6 };
+    r = meltSunR * Math.pow(1 - u, 1.6); flare = 1 - u * 0.6;
   }
-  return { x: vp.x, y: vp.y, r: sunRadius(), flare: heat };   // the sun sits on the vanishing point
+  const c = dirCam(0, Math.sin(SUN_ELEV), Math.cos(SUN_ELEV));
+  if (c[2] <= 0.05) return { x: 0, y: 0, r: 0, flare };
+  const [x, y] = toScreen(c);
+  return { x, y, r, flare };
 }
 
 // ---------- Batched wire drawing ----------
 // Every environment line goes into one of WIRE_LEVELS brightness buckets
 // (far = dim + 1px, near = bright + 2px) and each bucket is stroked once.
 const wrap = (v, m) => ((v % m) + m) % m;
-const offscreen = (x, y) => x < -40 || x > W + 40 || y < -40 || y > H + 40;
 const depthB = (z, far) => Math.pow(clamp(1 - z / far, 0, 1), 1.2);   // depth fade
 let wirePaths = [];
 function beginWire() { wirePaths = Array.from({ length: WIRE_LEVELS }, () => new Path2D()); }
@@ -816,123 +802,108 @@ function drawSun(now, s) {
   wirePoly(limb, Math.min(1, base + 0.15));
 }
 
-// ---------- Horizon + floor ----------
-function floorSpread() {                          // rows squash toward the horizon as you climb
-  return lerp(0.5, 0.14, clamp((viewAlt - SEA_LINE) / (1 - SEA_LINE), 0, 1));
-}
-const floorY = (sx, z, spread) => horizonAt(sx) + spread * FOCAL / z;
-
+// ---------- Horizon: the line at infinity, tilted by pitch and roll ----------
 function drawHorizon() {
-  const pts = [];
-  for (let i = 0; i <= 24; i++) { const x = (i / 24) * W; pts.push([x, horizonAt(x)]); }
-  wirePoly(pts, 0.9);
+  if (view.cp <= 0.01) return;
+  const y0 = FOCAL * Math.tan(view.pitch);        // below centre when looking up
+  const ends = [[-W, y0], [W, y0]].map(([a, b]) => [W / 2 + a * view.cr - b * view.sr, H / 2 + a * view.sr + b * view.cr]);
+  wire(ends[0][0], ends[0][1], ends[1][0], ends[1][1], 0.9);
 }
 
-function drawFloor(dt) {
-  gridScroll += fwdSpeed * 0.5 * dt;              // flows toward you as you fly, back on the fall
-  const spread = floorSpread(), phase = wrap(gridScroll, 1), zMax = GRID_Z0 + GRID_ROWS;
-  for (let r = 0; r < GRID_ROWS; r++) {           // cross lines
-    const d = wrap(r - phase, GRID_ROWS), z = GRID_Z0 + d;
-    const yOff = spread * FOCAL / z;
-    if (horizonY + yOff > H + 60) continue;
-    const pts = [];
-    for (let i = 0; i <= 12; i++) { const x = (i / 12) * W; pts.push([x, horizonAt(x) + yOff]); }
-    wirePoly(pts, depthB(z, zMax) * clamp((GRID_ROWS - d) / 1.5, 0, 1));
-  }
-  const zs = [0.3, 0.6, 1, 1.6, 2.5, 4, 6.5, zMax];   // long lines, sliced for the depth fade
-  for (let c = 0; c < GRID_COLS; c++) {
-    const x = (c - (GRID_COLS - 1) / 2) * GRID_X;
-    let px = projX(x, zs[0]), py = floorY(px, zs[0], spread);
-    for (let i = 1; i < zs.length; i++) {
-      const qx = projX(x, zs[i]), qy = floorY(qx, zs[i], spread);
-      wire(px, py, qx, qy, depthB((zs[i - 1] + zs[i]) / 2, zMax));
-      px = qx; py = qy;
+// ---------- Ground grid: scrolls toward you and passes under the bottom edge ----------
+const GRID_SLICES = [0, 0.5, 1.2, 2.5, 4.5, 8, 13, 20, 28, VIEW_FAR];   // long lines, sliced for depth fade
+function drawGround() {
+  const x0 = Math.floor(view.x / GRID) * GRID;
+  for (let i = -GRID_HALF; i <= GRID_HALF; i++) {
+    const x = x0 + i * GRID;
+    for (let s = 1; s < GRID_SLICES.length; s++) {
+      const a = GRID_SLICES[s - 1], b = GRID_SLICES[s];
+      seg3(x, 0, travel + a, x, 0, travel + b, depthB((a + b) / 2, VIEW_FAR));
     }
   }
-}
-
-// ---------- Tunnel: rectangles stacked toward the sun ----------
-function drawTunnel(dt) {
-  tunnelScroll += fwdSpeed * dt / TUNNEL_GAP;
-  const ph = wrap(tunnelScroll, 1);
-  const cy = -viewAlt * CLIMB_Y;                  // follows the camera's altitude, centred on the sun
-  const zMax = TUNNEL_Z0 + TUNNEL_N * TUNNEL_GAP;
-  for (let i = 0; i < TUNNEL_N; i++) {
-    const d = wrap(i - ph, TUNNEL_N), z = TUNNEL_Z0 + d * TUNNEL_GAP;
-    const b = depthB(z, zMax) * clamp((TUNNEL_N - d) / 1.2, 0, 1);   // fades in at the far end
-    const x1 = projX(-TUNNEL_RX, z), x2 = projX(TUNNEL_RX, z);
-    const y1 = projY(cy - TUNNEL_RY, z), y2 = projY(cy + TUNNEL_RY, z);
-    wirePoly([[x1, y1], [x2, y1], [x2, y2], [x1, y2]], b, true);
-  }
-  const zs = [TUNNEL_Z0, 0.6, 1, 1.6, 2.6, 4, 5.5, zMax];   // corner rails
-  for (const [ex, ey] of [[-1, -1], [1, -1], [1, 1], [-1, 1]]) {
-    let px = projX(ex * TUNNEL_RX, zs[0]), py = projY(cy + ey * TUNNEL_RY, zs[0]);
-    for (let i = 1; i < zs.length; i++) {
-      const qx = projX(ex * TUNNEL_RX, zs[i]), qy = projY(cy + ey * TUNNEL_RY, zs[i]);
-      wire(px, py, qx, qy, 0.8 * depthB((zs[i - 1] + zs[i]) / 2, zMax));
-      px = qx; py = qy;
-    }
+  const zStart = Math.ceil(travel / GRID) * GRID;
+  for (let j = 0; j < GRID_ROWS; j++) {
+    const z = zStart + j * GRID, d = z - travel;
+    seg3(view.x - GRID_HALF * GRID, 0, z, view.x + GRID_HALF * GRID, 0, z,
+         depthB(d, VIEW_FAR) * clamp((VIEW_FAR - d) / 4, 0, 1));
   }
 }
 
-// ---------- Mountains + clouds: jagged outlines passing at the sides ----------
-function moveScenery(o, dt, respawn) {
-  o.z -= fwdSpeed * dt;
-  if (fwdSpeed >= 0 && o.z < SCENERY_NEAR) respawn(o, SCENERY_FAR * (0.8 + 0.2 * Math.random()));
-  else if (o.z > SCENERY_FAR) respawn(o, SCENERY_NEAR + 0.3 + Math.random() * 1.2);
-}
+// Fade for scenery at distance d (dim far away, fades in at the far end)
+const sceneryB = d => depthB(d, VIEW_FAR * 1.2) * clamp((VIEW_FAR * 1.2 - d) / 5, 0, 1);
+// Passed behind you or drifted far to the side → respawn far ahead
+const passed = (o, behind, wide) => o.z - travel < behind || Math.abs(o.x - view.x) > wide;
 
-function drawMountains(dt) {
-  const spread = floorSpread(), shrink = spread / 0.5;    // drop away with the floor
+// ---------- Mountains: jagged ridges at the sides ----------
+function drawMountains() {
   for (const m of mountains) {
-    moveScenery(m, dt, spawnMountain);
-    const b = depthB(m.z, SCENERY_FAR) * clamp((SCENERY_FAR - m.z) / 1.5, 0, 1);
-    const k = FOCAL / m.z;
-    wirePoly(m.prof.map(([u, h]) => {
-      const sx = projX(m.x + u * m.w, m.z);
-      return [sx, floorY(sx, m.z, spread) - h * m.h * k * shrink];
-    }), b);
-  }
-}
-
-function drawClouds(dt) {
-  for (const c of cloudShapes) {
-    moveScenery(c, dt, spawnCloud);
-    const cx = projX(c.x, c.z), cy = projY(c.y, c.z), k = FOCAL / c.z;
-    // Slid out of the sky by climbing or falling: bring in a new one far away
-    if (cy > horizonAt(cx) + 40 || cy < -300) { spawnCloud(c, SCENERY_FAR * (0.6 + 0.4 * Math.random())); continue; }
-    const b = 0.8 * depthB(c.z, SCENERY_FAR) * clamp((SCENERY_FAR - c.z) / 1.5, 0, 1);
-    wirePoly(c.pts.map(([dx, dy]) => [cx + dx * k, cy + dy * k]), b, true);
-  }
-}
-
-// ---------- Speed lines: red streaks rushing out from the sun ----------
-function drawSpeedLines(dt) {
-  const v = fwdSpeed;
-  const show = clamp((Math.abs(v) - 1.2) / 2, 0, 1);      // only when moving fast
-  for (const p of speedLines) {
-    p.z -= v * dt;
-    if (v >= 0) {
-      if (p.z < SPEED_NEAR || offscreen(projX(p.x, p.z), projY(p.y, p.z))) spawnSpeed(p, SPEED_FAR * (0.75 + 0.25 * Math.random()));
-    } else if (p.z > SPEED_FAR) {
-      spawnSpeed(p, SPEED_NEAR + Math.random() * 0.8);
+    if (passed(m, 0.5, 45)) spawnMountain(m, VIEW_FAR * (0.8 + 0.3 * Math.random()));
+    const b = sceneryB(m.z - travel), P = m.prof;
+    for (let i = 1; i < P.length; i++) {
+      seg3(m.x + P[i - 1][0] * m.w, P[i - 1][1] * m.h, m.z, m.x + P[i][0] * m.w, P[i][1] * m.h, m.z, b);
     }
+  }
+}
+
+// ---------- Towers: tapering lattice with rings, braces and an antenna ----------
+function drawTowers() {
+  for (const t of towers) {
+    if (passed(t, -0.5, 30)) spawnTower(t, VIEW_FAR * (0.6 + 0.4 * Math.random()));
+    const b = sceneryB(t.z - travel);
+    const ring = (y, w) => [[t.x - w, y, t.z - w], [t.x + w, y, t.z - w], [t.x + w, y, t.z + w], [t.x - w, y, t.z + w]];
+    let prev = ring(0, 0.3);
+    for (let l = 1; l <= t.levels; l++) {
+      const cur = ring((t.h * l) / t.levels, lerp(0.3, 0.1, l / t.levels));
+      for (let k = 0; k < 4; k++) {
+        const a = prev[k], c = cur[k], n = cur[(k + 1) % 4];
+        seg3(a[0], a[1], a[2], c[0], c[1], c[2], b);           // leg
+        seg3(c[0], c[1], c[2], n[0], n[1], n[2], b);           // ring
+        seg3(a[0], a[1], a[2], n[0], n[1], n[2], b * 0.7);     // brace
+      }
+      prev = cur;
+    }
+    seg3(t.x, t.h, t.z, t.x, t.h + 0.8, t.z, b);               // antenna
+  }
+}
+
+// ---------- Clouds: eye-level outlines that part around the camera ----------
+function drawClouds() {
+  for (const c of cloudShapes) {
+    if (passed(c, 0.3, 30)) spawnCloud(c, VIEW_FAR * (0.7 + 0.3 * Math.random()));
+    const d = c.z - travel, n = c.pts.length, y = view.h + c.yRel;
+    const b = 0.85 * depthB(d, VIEW_FAR) * clamp((VIEW_FAR - d) / 4, 0, 1);
+    const split = d < CLOUD_SPLIT ? 3.5 * Math.pow(1 - d / CLOUD_SPLIT, 1.5) : 0;
+    const half = (from, to, off) => {
+      for (let i = from; i < to; i++) {
+        const p = c.pts[i % n], q = c.pts[(i + 1) % n];
+        seg3(c.x + p[0] + off, y + p[1], c.z, c.x + q[0] + off, y + q[1], c.z, b);
+      }
+    };
+    if (split <= 0) half(0, n, 0);
+    else { half(n / 4, (3 * n) / 4, -split); half((3 * n) / 4, n + n / 4, split); }   // left half, right half
+  }
+}
+
+// ---------- Speed lines: red streaks rushing past once you're flying fast ----------
+function drawSpeedLines() {
+  const show = clamp((fwdSpeed - 6) / 6, 0, 1);
+  for (const p of speedLines) {
+    if (passed(p, 0.3, 8)) spawnSpeed(p, 14 + Math.random() * 8);
     if (show <= 0) continue;
-    const z2 = Math.max(0.08, p.z + v * 0.06);            // where it just was
-    const t = 1 - (p.z - SPEED_NEAR) / (SPEED_FAR - SPEED_NEAR);
-    wire(projX(p.x, p.z), projY(p.y, p.z), projX(p.x, z2), projY(p.y, z2), show * (0.25 + 0.75 * t * t));
+    const t = clamp(1 - (p.z - travel) / 22, 0, 1);
+    seg3(p.x, p.y, p.z, p.x, p.y, p.z + fwdSpeed * 0.07, show * (0.25 + 0.75 * t * t));
   }
 }
 
 // The whole world, in one batched stroke pass, then scanlines
 function drawWorld(now, dt, sun) {
   beginWire();
-  drawTunnel(dt);
-  drawFloor(dt);
+  drawGround();
   drawHorizon();
-  drawMountains(dt);
-  drawClouds(dt);
-  drawSpeedLines(dt);
+  drawMountains();
+  drawTowers();
+  drawClouds();
+  drawSpeedLines();
   drawSun(now, sun);
   flushWire();
   drawScanlines();
@@ -983,38 +954,22 @@ function drawFeathers(dt) {
 }
 
 // ---------- Body ----------
-function drawFace() {
-  if (!face) return;
-  const map = mapper(), hot = hotColor();
-  let style = "", alpha = -1;
-  for (const f of FACE_DOTS) {
-    const lm = face[f.i];
-    if (!lm) continue;
-    const p = map(lm);
-    const want = p.y > horizonAt(p.x) ? SEA_DOT : hot;
-    if (want !== style) ctx.fillStyle = style = want;
-    if (f.alpha !== alpha) ctx.globalAlpha = alpha = f.alpha;
-    ctx.fillRect(p.x - f.size / 2, p.y - f.size / 2, f.size, f.size);
-  }
-  ctx.globalAlpha = 1;
-}
-
 function drawHands() {
   // Short fading trails from the last few detection frames
   ctx.fillStyle = HAND_BLUE;
   const n = trailHist.length;
   for (let k = 0; k < n - 1; k++) {
     const age = n - 1 - k;                          // 1 = most recent
-    const s = Math.max(1, 3.6 - age * 0.45);
+    const s = Math.max(2, 7 - age * 1.1);
     ctx.globalAlpha = 0.4 * (1 - age / (TRAIL_FRAMES + 1));
     for (const pts of trailHist[k]) for (const p of pts) ctx.fillRect(p.x - s / 2, p.y - s / 2, s, s);
   }
   ctx.globalAlpha = 1;
-  // Current dots: dark outline, then blue, on top of everything (incl. the sun)
+  // Current dots, big (they're your fists, right in front of you): dark outline, then blue
   ctx.fillStyle = HAND_OUTLINE;
-  for (const pts of handPts) for (const p of pts) ctx.fillRect(p.x - 4, p.y - 4, 8, 8);
+  for (const pts of handPts) for (const p of pts) ctx.fillRect(p.x - 7, p.y - 7, 14, 14);
   ctx.fillStyle = HAND_BLUE;
-  for (const pts of handPts) for (const p of pts) ctx.fillRect(p.x - 2.5, p.y - 2.5, 5, 5);
+  for (const pts of handPts) for (const p of pts) ctx.fillRect(p.x - 4.5, p.y - 4.5, 9, 9);
 }
 
 function drawFalling(dt, t) {
@@ -1045,7 +1000,6 @@ function render(now, dt) {
   }
 
   drawWorld(now, dt, sun);
-  drawFace();
   drawWax(dt);
   drawFeathers(dt);
   drawHands();                        // last: always visible inside the glow
@@ -1104,14 +1058,6 @@ $("reach").onclick = async () => {
       runningMode: "VIDEO", numHands: 2,
       minHandDetectionConfidence: .5, minHandPresenceConfidence: .5, minTrackingConfidence: .5,
     });
-    try {
-      faceLm = await createTask(FaceLandmarker, fileset, {
-        baseOptions: { modelAssetPath: FACE_MODEL },
-        runningMode: "VIDEO", numFaces: 1,
-      });
-    } catch (e) {
-      console.warn("Face model failed; continuing with hands only", e);
-    }
 
     // One combined stream for every flight's recording
     if (canvas.captureStream) {
