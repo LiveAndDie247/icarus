@@ -14,7 +14,6 @@
   }
   /* Fixed 720x1280 canvas, scaled to fit the screen with letterboxing */
   canvas { display: block; width: 100vw; height: 100vh; height: 100dvh; object-fit: contain; }
-  video { display: none; }
 
   .screen {
     position: fixed; inset: 0; display: flex; flex-direction: column;
@@ -39,9 +38,8 @@
 <body>
 
 <canvas id="canvas" width="720" height="1280"></canvas>
-<video id="video" playsinline muted></video>
 
-<!-- First screen: one button. It unlocks audio and asks for the camera. -->
+<!-- First screen: one button. It unlocks audio, asks for motion access and sets "level". -->
 <div id="intro" class="screen">
   <button id="reach">Reach up</button>
 </div>
@@ -54,24 +52,29 @@
 </div>
 
 <script type="module">
-import { FilesetResolver, HandLandmarker }
-  from "https://cdn.jsdelivr.net/npm/@mediapipe/tasks-vision@0.10.14/vision_bundle.mjs";
-
 // ============================================================
 // Constants
 // ============================================================
-const WASM_URL   = "https://cdn.jsdelivr.net/npm/@mediapipe/tasks-vision@0.10.14/wasm";
-const HAND_MODEL = "https://storage.googleapis.com/mediapipe-models/hand_landmarker/hand_landmarker/float16/1/hand_landmarker.task";
 
-// Zones (altitude: 0 = bottom of frame, 1 = top)
+// Gyroscope controls (DeviceOrientation). "Level" = how the phone is held when you tap.
+const PITCH_SIGN = 1;         // +1: tilting the top edge toward you climbs. Flip to -1 for the other way.
+const PITCH_RANGE = 30;       // degrees of tilt for full climb / dive
+const ROLL_RANGE = 30;        // degrees of roll for a full bank / turn
+const TILT_DEAD = 3;          // degrees of dead zone around level
+const CLIMB_RATE = 0.35;      // altitude units / s at full climb
+const SINK_RATE = 0.03;       // gravity: holding level slowly sinks
+const ALT_TAU = 0.4;          // seconds for the climb rate to follow the tilt
+const DIVE_GAIN = 1.3;        // speed × (1 + 1.3) in a full dive
+const SEA_END = 3.0;          // seconds back at sea level that end a flight
+
+// Zones (altitude: 0 = the sea, 1 = the top)
 const SEA_LINE = 0.30;        // below this: the sea
 const SUN_LINE = 0.70;        // above this: the sun
 
 // Heat / melt
 const HEAT_TIME   = 4.0;      // seconds in the sun to reach full heat
 const COOL_TIME   = 3.0;      // seconds out of the sun to cool fully
-const MELT_TIME   = 2.0;      // length of the fall
-const LOST_TIMEOUT = 3.0;     // seconds with no hands that end a flight
+const MELT_TIME   = 2.0;      // length of the melt sweep (the fall itself is FALL_TIME)
 
 // Pitch
 const ROOT_HZ = 110;          // A2: the sea tone and the bottom of the sky
@@ -98,16 +101,11 @@ const NEAR = 0.15;                    // near clip plane
 const PITCH_MAX = Math.atan((H / 2 - 60) / FOCAL);   // near the sun the horizon sits at the bottom edge
 const CAM_H_SEA = 0.45, CAM_H_TOP = 4.5;             // eye height over the ground
 const SPEED_BASE = 4, SPEED_ALT = 10;                // forward speed when hovering, + extra at the top
-const BANK_MAX = 0.6;                 // radians of roll at full input
-const BANK_HEIGHT = 0.5, BANK_TILT = 0.8;            // roll from hand-height difference / from hand tilt
+const BANK_MAX = 0.6;                 // radians of camera roll at full phone roll
 const DRIFT = 7;                      // sideways world units / s per radian of bank
-const YAW_RATE = 1.3;                 // radians / s of turn with hands fully to one side
-const STEER_RANGE = 0.35;             // hand offset (fraction of width from centre) for a full turn
-const STEER_DEAD = 0.08;              // small dead zone around centre
-const THRUST_RANGE = 0.3;             // hand size ±30% from your neutral = full thrust / full brake
-const THRUST_GAIN = 1.2, BRAKE_GAIN = 0.6;           // speed × (1 + 1.2) pushed, × (1 − 0.6) pulled back
-const FOV_WIDEN = 0.35;               // field of view widens under thrust (focal / 1.35 at full)
-const CALIB_FRAMES = 20;              // detection frames used to learn your neutral hand size
+const YAW_RATE = 1.3;                 // radians / s of turn at full phone roll
+const CAM_PITCH_TILT = 0.25;          // extra camera nose up/down from the phone's pitch (radians at full)
+const FOV_WIDEN = 0.35;               // field of view widens in a dive (focal / 1.35 at full)
 const CAM_TAU = 0.1;                  // camera easing time constant, seconds
 const SUN_ELEV = 41 * Math.PI / 180;  // the sun: fixed in the world, this far above the horizon
 const AIM_CONE = 14 * Math.PI / 180;  // heat only builds with the sun within this angle of centre
@@ -160,18 +158,24 @@ const VISOR_RATE = 3;                 // drops / s at full heat
 const GLITCH_FROM = 0.55;             // heat where it starts; worst at full heat
 const GREEK = "αβγδεζηθικλμνξοπρστυφχψωΓΔΘΛΞΠΣΦΨΩ";
 
-// Microphone
-const VOICE_THRUST = 0.8;             // full voice adds this much thrust
-const SHOUT_HEAT = 0.6;               // the sun answers shouting above this heat
+// Greek rain, behind everything
+const RAIN_MAX = 30;                  // columns at full density
+const RAIN_MIN = 6;                   // columns at sea
+const LATIN = "ABCDEFGHIJKLMNOPQRSTUVWXYZ0123456789#$%&*+=<>/\\|?!";
 
-// Body: the hands, drawn big at the bottom corners like fists out ahead
-const HAND_SPAN = 190;                // px from wrist to middle knuckle when drawn
-const TRAIL_FRAMES = 4;               // hand trail length, in detection frames
+// The body: two rendered wireframe hands at the lower corners
+const HAND_BASE = [0.42, -0.62, 1.0]; // right hand's wrist in camera space (left is mirrored)
+const HAND_SCALE = 0.42;              // hand length in camera units
+const HAND_PITCH = 0.6;               // fingers tipped forward, away from you (radians about x)
+const HAND_INWARD = 0.25;             // tilted in toward the centre (radians about z)
+const BONE = "rgb(255, 215, 200)";    // white-red bones
+const CHAR = "rgb(255, 120, 40)";     // flesh about to burn
+const BURN_TIP = 0.15, BURN_WRIST = 0.95;            // heat where fingertips / wrist flesh burns away
+const FRAG_CAP = 160;                 // burnt flesh fragments in the air
+const COVER_IN = 0.8;                 // melt: seconds for the hands to rise over the camera
+const COVER_OUT_AT = FALL_TIME - 1.2, COVER_OUT = 0.6;   // ...and when / how fast they drop away
 const FEATHER_CAP = 50;
 const WAX_CAP = 110;
-const TIPS = [4, 8, 12, 16, 20];      // fingertip landmarks
-const HAND_BLUE = "rgb(90, 155, 255)";
-const HAND_OUTLINE = "rgb(3, 8, 26)";
 const WAX_COLORS = ["rgb(255, 70, 30)", "rgb(255, 105, 40)", "rgb(235, 45, 25)", "rgb(255, 135, 60)"];
 
 // ============================================================
@@ -179,35 +183,35 @@ const WAX_COLORS = ["rgb(255, 70, 30)", "rgb(255, 105, 40)", "rgb(235, 45, 25)",
 // ============================================================
 const $ = id => document.getElementById(id);
 const canvas = $("canvas"), ctx = canvas.getContext("2d");
-const video = $("video");
-
-let handLm = null;
 let audio = null;
 let recStream = null, recorder = null, chunks = [];
 let lastBlob = null;
 
 let mode = "intro";           // intro | live | melt | results
-let altitude = 0;             // smoothed 0..1
+let altitude = 0;             // 0..1, a physics value driven by the phone's pitch
+let altVel = 0;               // altitude units / s
 let heat = 0;                 // 0..1
-let hands = [];               // arrays of 21 landmarks
-let lastHandTime = 0;
 let flight = null;            // { start } while a flight is in progress
+let seaSince = 0;             // when you last sank back to sea level during a flight
 let meltStart = 0, meltSunR = 0;
-let lastVideoTime = -1, frameNo = 0, lastFrame = performance.now();
+let lastFrame = performance.now();
+
+// Gyro input: raw orientation, the "level" it's measured from, and the shaped inputs
+const gyro = { beta: null, gamma: null, beta0: 0, gamma0: 0, calibrate: true, seen: false };
+const keys = new Set();       // desktop fallback: arrow keys / WASD
+let pitchIn = 0, rollIn = 0;  // −1..1: climb(+)/dive(−), roll right(+)/left(−)
 
 // Camera (updated every frame in updateView). pitch > 0 looks up; roll > 0 = banked left.
 // yaw > 0 = heading right. The camera flies along its heading (hx, hz).
 const view = { x: 0, h: CAM_H_SEA, yaw: 0, pitch: 0, roll: 0, cy: 1, sy: 0, hx: 0, hz: 1, cp: 1, sp: 0, cr: 1, sr: 0 };
-let focal = FOCAL;                    // widens (smaller) under thrust
+let focal = FOCAL;                    // widens (smaller) in a dive
 let viewAlt = 0;                      // altitude the camera shows (falls during the melt)
 let travel = 0;                       // the camera's world z
 let fwdSpeed = SPEED_BASE;            // world units / s, always forward
-let bank = 0, bankTarget = 0;         // roll from hand height difference + hand tilt
-let yawRate = 0, yawTarget = 0;       // turn rate from the hands' average x
-let thrust = 0, thrustTarget = 0;     // −1 (pulled back) .. +1 (pushed forward)
-let sizeBase = 0, sizeSamples = 0;    // your neutral hand size, learned at the start
-let steerOffset = 0;                  // −1..1, for nudging the fists toward the turn
-let sunAim = 0;                       // 1 = sun dead centre, 0 = outside the aim cone
+let bank = 0, bankTarget = 0;         // camera roll from the phone's roll
+let yawRate = 0, yawTarget = 0;       // turn rate from the phone's roll
+let thrustEff = 0;                    // 0..1: how hard you're diving (drives speed, FOV, speed lines, engine)
+let sunAim = 0;                      // 1 = sun dead centre, 0 = outside the aim cone
 let meltAlt0 = 0, meltPitch0 = 0, meltH0 = CAM_H_SEA;
 let meltX0 = 0, meltZ0 = 0, meltYaw0 = 0, meltHx = 0, meltHz = 1;   // where the fall began
 
@@ -225,10 +229,12 @@ let blurCanvas = null, blurCtx = null;
 let stutterLeft = 0;                  // frames to hold (renderer failing)
 let tilt = null;                      // { start, end, amt }: the horizon tilting on its own
 
-let mic = null;                       // { an, buf } once the microphone is on
-let voiceFloor = -60, voiceLevel = 0, voiceBoost = 0;
-let thrustEff = 0;                    // hands + voice
-let shout = null, shoutCool = 0;      // { text, until }: the sun answering
+// The body: rendered hands (screen-space results kept for wax, feathers and burn fragments)
+let handTips = [];                    // fingertip screen points this frame
+let handPtsScreen = [];               // a few screen points on the hands, for feathers
+const burnt = new Set();              // flesh segment ids already burnt off (so fragments spawn once)
+let frags = [];                       // burnt flesh falling away: { cx, cy, hx, hy, vx, vy, spin, life, max }
+let rain = [];                        // Greek rain columns
 
 // Wire scenery in world coordinates (spawned ahead along the current heading)
 const mountains = Array.from({ length: MOUNTAIN_N }, () => spawnMountain({}, 6 + Math.random() * 34));
@@ -236,12 +242,7 @@ const towers = Array.from({ length: TOWER_N }, () => spawnTower({}, 4 + Math.ran
 const cloudShapes = Array.from({ length: CLOUD_N }, (_, i) => spawnCloud({}, 8 + i * 8 + Math.random() * 4));
 const speedLines = Array.from({ length: SPEED_N }, () => spawnSpeed({}, 1 + Math.random() * 20));
 
-let climb = 0, prevAlt = 0;           // smoothed climb rate, altitude units / s
-let rawPts = [], prevRawPts = [];     // hand landmarks mapped to the canvas (where the camera sees them)
-let handPts = [];                     // the same hands, drawn big at the bottom corners
-let trailHist = [];                   // last few frames of handPts
-let lastDetect = 0;
-let feathers = [], wax = [], falling = [];
+let feathers = [], wax = [];
 
 const clamp = (v, a, b) => Math.min(b, Math.max(a, v));
 const lerp = (a, b, t) => a + (b - a) * t;
@@ -332,7 +333,7 @@ function seg3(x1, y1, z1, x2, y2, z2, b) {
   wire(p[0], p[1], q[0], q[1], b);
 }
 
-// Per-frame camera: altitude pitches it up and lifts it; the hands bank it; the melt dives it
+// Per-frame camera: altitude pitches it up and lifts it; the phone's roll banks it; the melt dives it
 function updateView(now, dt) {
   const k = 1 - Math.exp(-dt / CAM_TAU);           // ~100 ms camera easing
   if (mode === "melt") {
@@ -360,11 +361,11 @@ function updateView(now, dt) {
     viewAlt = altitude;
     const sky = clamp((viewAlt - SEA_LINE) / (1 - SEA_LINE), 0, 1);
     const ease = sky * sky * (3 - 2 * sky);
-    view.pitch += (PITCH_MAX * ease - view.pitch) * k;
+    view.pitch += (PITCH_MAX * ease + CAM_PITCH_TILT * pitchIn - view.pitch) * k;   // + nose follows the phone
     view.h += (lerp(CAM_H_SEA, CAM_H_TOP, Math.pow(sky, 1.2)) - view.h) * k;
     bank += (bankTarget - bank) * k;
     yawRate += (yawTarget - yawRate) * k;
-    focal += (FOCAL / (1 + FOV_WIDEN * Math.max(0, thrustEff)) - focal) * k;   // wider view under thrust
+    focal += (FOCAL / (1 + FOV_WIDEN * thrustEff) - focal) * k;   // wider view in a dive
     // The father keeps his distance ahead, catching up slowly so your turns sweep him across the view
     const kf = 1 - Math.exp(-dt / FATHER_FOLLOW);
     father.x += (view.x + view.hx * FATHER_AHEAD - father.x) * kf;
@@ -795,14 +796,9 @@ function startMelt(now) {
   meltAlt0 = altitude; meltPitch0 = view.pitch; meltH0 = view.h;
   meltX0 = view.x; meltZ0 = travel; meltYaw0 = view.yaw; meltHx = view.hx; meltHz = view.hz;
   lie = null; lieTextUntil = 0;       // all text goes silent
-  shout = null; tilt = null; stutterLeft = 0; fallWhispered = false;
+  tilt = null; stutterLeft = 0; fallWhispered = false;
   meltVoice();
-  // Every body dot breaks loose and falls under gravity
-  falling = handPts.flat().map(p => ({
-    x: p.x, y: p.y, size: 6, c: HAND_BLUE, a: 1,
-    vx: (Math.random() - 0.5) * 160, vy: -Math.random() * 260,
-  }));
-  trailHist = [];
+  // (the hands now rise and cover the camera: see handPose)
 }
 
 // fromMelt: the wind cuts and the quiet sea tone plays under the results
@@ -822,133 +818,76 @@ async function endFlight(flownMs, fromMelt = false) {
 }
 
 // ============================================================
-// Detection
+// Gyroscope input (DeviceOrientation)
 // ============================================================
-// Map a normalized landmark to the 720x1280 canvas: mirrored, "cover" fit
-function mapper() {
-  const vw = video.videoWidth || 640, vh = video.videoHeight || 480;
-  const s = Math.max(W / vw, H / vh);
-  const ox = (W - vw * s) / 2, oy = (H - vh * s) / 2;
-  return p => ({ x: ox + (1 - p.x) * vw * s, y: oy + p.y * vh * s });
+// beta = front/back tilt, gamma = left/right roll (portrait). "Level" is captured from
+// the first reading after you tap Reach up (or Fly again).
+function onOrientation(e) {
+  if (e.beta == null || e.gamma == null) return;
+  gyro.beta = e.beta; gyro.gamma = e.gamma; gyro.seen = true;
+  if (gyro.calibrate) { gyro.beta0 = e.beta; gyro.gamma0 = e.gamma; gyro.calibrate = false; }
+}
+function recalibrate() { gyro.calibrate = true; }
+
+// iOS needs explicit permission, and only from inside a tap
+async function requestMotion() {
+  try {
+    const DOE = window.DeviceOrientationEvent;
+    if (DOE && typeof DOE.requestPermission === "function") {
+      const r = await DOE.requestPermission();
+      if (r !== "granted") console.warn("Motion permission:", r);
+    }
+  } catch (e) { console.warn("Motion permission failed", e); }
+  window.addEventListener("deviceorientation", onOrientation);
 }
 
-// The hands as you'd see your own fists flying: each one scaled up and anchored
-// at a bottom corner (screen-left hand → left corner), keeping its live shape.
-// Output keeps the detector's order so indices match rawPts.
-function bigHands(raw) {
-  if (!raw.length) return [];
-  const meanY = raw.reduce((s, pts) => s + pts[0].y, 0) / raw.length;
-  const leftIdx = raw.length === 2 ? (raw[0][0].x < raw[1][0].x ? 0 : 1) : -1;
-  return raw.map((pts, i) => {
-    const left = leftIdx >= 0 ? i === leftIdx : pts[0].x < W / 2;
-    const ax = (left ? W * 0.2 : W * 0.8) + steerOffset * W * 0.08;   // fists lean into the turn
-    const ay = H - 70 + (pts[0].y - meanY) * 0.5;          // the higher hand sits a little higher
-    const span = Math.hypot(pts[9].x - pts[0].x, pts[9].y - pts[0].y) || 1;
-    const s = (HAND_SPAN * (1 + 0.25 * thrustEff)) / span;  // pushed forward → bigger fists
-    return pts.map(p => ({ x: ax + (p.x - pts[0].x) * s, y: ay + (p.y - pts[0].y) * s }));
-  });
+// Tilt in degrees → −1..1, with a small dead zone
+function shape(deg, range) {
+  const a = Math.max(0, Math.abs(deg) - TILT_DEAD) / (range - TILT_DEAD);
+  return Math.sign(deg) * clamp(a, 0, 1);
 }
 
-function detect(now) {
-  const res = handLm.detectForVideo(video, now);
-  hands = res.landmarks || [];
-
-  // Hands on the canvas (for motion + banking) and drawn big (for display), plus trails
-  const map = mapper();
-  prevRawPts = rawPts;
-  rawPts = hands.map(lm => lm.map(map));
-  steerInput(now);
-  handPts = bigHands(rawPts);
-  trailHist.push(handPts);
-  if (trailHist.length > TRAIL_FRAMES + 1) trailHist.shift();
-
-  // Feathers: fast hand motion (measured on the real hands) sheds a few white specks off the big ones
-  const dtDet = (now - lastDetect) / 1000;
-  lastDetect = now;
-  if (mode === "live" && dtDet > 0 && dtDet < 0.15) {
-    rawPts.forEach((pts, h) => {
-      const prev = prevRawPts[h];
-      if (!prev) return;
-      pts.forEach((p, j) => {
-        const q = prev[j], dx = p.x - q.x, dy = p.y - q.y, d = Math.hypot(dx, dy);
-        if (d > 260) return;                      // hand swap, not motion
-        const speed = d / dtDet;
-        if (speed > 1400 && feathers.length < FEATHER_CAP && Math.random() < Math.min(0.035, (speed - 1400) / 20000)) {
-          const b = handPts[h][j];
-          feathers.push({
-            x: b.x, y: b.y, vx: dx / dtDet * 0.06 + (Math.random() - 0.5) * 30, vy: dy / dtDet * 0.04,
-            ph: Math.random() * 6.28, life: 0, max: 1.4 + Math.random() * 1.2, size: 1.4 + Math.random() * 1.2,
-          });
-        }
-      });
-    });
+// Per frame: phone tilt (or keys on a desktop) → pitch and roll inputs → targets
+function readControls() {
+  let p = 0, r = 0;
+  if (gyro.seen && !gyro.calibrate) {
+    p = PITCH_SIGN * shape(gyro.beta - gyro.beta0, PITCH_RANGE);
+    let dg = gyro.gamma - gyro.gamma0;
+    if (dg > 90) dg -= 180; else if (dg < -90) dg += 180;     // gamma wraps near upright
+    r = shape(dg, ROLL_RANGE);
   }
-
-  if (hands.length) {
-    lastHandTime = now;
-    // Altitude = average wrist height, 0 = bottom of the frame, 1 = top
-    const wristY = hands.reduce((sum, lm) => sum + lm[0].y, 0) / hands.length;
-    altitude += (clamp(1 - wristY, 0, 1) - altitude) * 0.75;   // just enough to stop jitter
-  }
+  if (keys.has("ArrowUp") || keys.has("w")) p = 1;
+  if (keys.has("ArrowDown") || keys.has("s")) p = -1;
+  if (keys.has("ArrowLeft") || keys.has("a")) r = -1;
+  if (keys.has("ArrowRight") || keys.has("d")) r = 1;
+  pitchIn = p; rollIn = r;
+  yawTarget = rollIn * YAW_RATE;                 // roll right → turn right
+  bankTarget = -rollIn * BANK_MAX;               // (bank > 0 = banked left)
+  thrustEff = Math.max(0, -pitchIn);             // diving is thrust
 }
+addEventListener("keydown", e => keys.add(e.key.length === 1 ? e.key.toLowerCase() : e.key));
+addEventListener("keyup", e => keys.delete(e.key.length === 1 ? e.key.toLowerCase() : e.key));
 
-// Controls from the hands, every detection frame (instant; only the camera eases)
-let lastSeen = 0;
-function steerInput(now) {
-  if (!rawPts.length) {
-    yawTarget = 0; bankTarget = 0; thrustTarget = 0;
-    thrust += (0 - thrust) * 0.6;
-    if (now - lastSeen > 1000) sizeSamples = 0;           // hands gone a while: relearn neutral size
-    return;
-  }
-  lastSeen = now;
-
-  // Yaw: average hand x. Hands left → turn left (the world swings right)
-  const avgX = rawPts.reduce((s, p) => s + p[0].x, 0) / rawPts.length;
-  let off = (avgX - W / 2) / (W * STEER_RANGE);
-  off = Math.sign(off) * Math.max(0, Math.abs(off) - STEER_DEAD) / (1 - STEER_DEAD);
-  steerOffset = clamp(off, -1, 1);
-  yawTarget = steerOffset * YAW_RATE;
-
-  // Bank: hand tilt (wrist → middle knuckle, 0 = fingers straight up; leaning left banks left)
-  // plus height difference (screen-left hand lower banks left)
-  const tilt = rawPts.reduce((s, p) => s + Math.atan2(p[9].x - p[0].x, p[0].y - p[9].y), 0) / rawPts.length;
-  let b = -tilt * BANK_TILT;
-  if (rawPts.length === 2) {
-    const [l, r] = rawPts[0][0].x < rawPts[1][0].x ? rawPts : [rawPts[1], rawPts[0]];
-    b += clamp((l[0].y - r[0].y) / (H * 0.35), -1, 1) * BANK_HEIGHT;
-  }
-  bankTarget = clamp(b, -BANK_MAX, BANK_MAX);
-
-  // Thrust: hand size vs your neutral size (learned over the first frames)
-  const size = rawPts.reduce((s, p) => s + Math.hypot(p[9].x - p[0].x, p[9].y - p[0].y), 0) / rawPts.length;
-  if (sizeSamples < CALIB_FRAMES) {
-    sizeBase = (sizeBase * sizeSamples + size) / (sizeSamples + 1);
-    sizeSamples++;
-    thrustTarget = 0;
-  } else {
-    thrustTarget = clamp((size / sizeBase - 1) / THRUST_RANGE, -1, 1);
-  }
-  thrust += (thrustTarget - thrust) * 0.6;               // light de-jitter only
+// Altitude physics: climb rate follows the tilt (with a little lag); gravity sinks you slowly
+function updateAltitude(dt) {
+  const target = pitchIn * CLIMB_RATE - SINK_RATE;
+  altVel += (target - altVel) * (1 - Math.exp(-dt / ALT_TAU));
+  altitude += altVel * dt;
+  if (altitude <= 0) { altitude = 0; altVel = Math.max(0, altVel); }
+  if (altitude >= 1) { altitude = 1; altVel = Math.min(0, altVel); }
 }
 
 // ============================================================
 // Game logic (per frame)
 // ============================================================
 function step(now, dt) {
-  // Climb rate (altitude units / s), smoothed
-  if (dt > 0) climb += ((altitude - prevAlt) / dt - climb) * clamp(dt * 6, 0, 1);
-  prevAlt = altitude;
+  if (mode === "live") { readControls(); updateAltitude(dt); }
+  else if (mode === "results") { readControls(); thrustEff = 0; }
 
-  // Thrust = hands (push / pull) + your voice
-  updateMic(now);
-  thrustEff = clamp(thrust + voiceBoost, -1, 1);
-
-  // Always flying forward along the heading: base speed, faster with altitude,
-  // times thrust (push forward) or brake (pull back). The melt keeps your momentum.
+  // Always flying forward along the heading: base speed, faster with altitude and when diving.
+  // The melt keeps your momentum.
   if (mode !== "melt") {
-    const mult = thrustEff >= 0 ? 1 + THRUST_GAIN * thrustEff : 1 + BRAKE_GAIN * thrustEff;
-    const target = Math.max(SPEED_BASE * 0.4, (SPEED_BASE + SPEED_ALT * altitude) * mult);
+    const target = (SPEED_BASE + SPEED_ALT * altitude) * (1 + DIVE_GAIN * thrustEff);
     fwdSpeed += (target - fwdSpeed) * (1 - Math.exp(-dt / CAM_TAU));
     // Banking drifts the world sideways (camera slides along -right = (-hz, +hx))
     view.x -= bank * DRIFT * dt * view.hz;
@@ -962,24 +901,33 @@ function step(now, dt) {
   updateFigures(dt);
   updateVisor(dt);
 
+  updateRain(dt);
+  updateFrags(dt);
+
   if (mode === "live") {
-    const visible = hands.length > 0;
     spawnWax(dt);
+    spawnFeathers(dt);
     spawnFigures(dt);
     recordGhost(now);
     updateLie(now, dt);
 
     // Heat builds only when you're up in the sun zone AND aiming at it
     // (faster the closer to dead centre); otherwise it cools
-    if (visible && altitude >= SUN_LINE && sunAim > 0) heat = clamp(heat + sunAim * dt / HEAT_TIME, 0, 1);
+    if (altitude >= SUN_LINE && sunAim > 0) heat = clamp(heat + sunAim * dt / HEAT_TIME, 0, 1);
     else heat = clamp(heat - dt / COOL_TIME, 0, 1);
 
-    if (!flight && visible && altitude > SEA_LINE) startFlight(now);
+    if (!flight && altitude > SEA_LINE) { startFlight(now); seaSince = 0; }
 
     if (flight && heat >= 1) { startMelt(now); return; }
-    if (flight && now - lastHandTime > LOST_TIMEOUT * 1000) { endFlight(lastHandTime - flight.start); return; }
+    // Sank back into the sea and stayed there: the flight is over
+    if (flight) {
+      if (altitude <= 0.001) {
+        if (!seaSince) seaSince = now;
+        else if (now - seaSince > SEA_END * 1000) { endFlight(seaSince - flight.start); return; }
+      } else seaSince = 0;
+    }
 
-    updateVoice(visible);
+    updateVoice(true);
   } else if (mode === "melt") {
     if (now - meltStart > FALL_TIME * 1000) {
       altitude = 0;                   // in the water: cut to the results
@@ -1239,38 +1187,263 @@ function drawVisor() {
   ctx.stroke();
 }
 
-// ---------- Microphone: your voice adds thrust; at high heat the sun answers shouting ----------
-async function startMic() {
-  try {
-    const stream = await navigator.mediaDevices.getUserMedia({
-      audio: { echoCancellation: true, noiseSuppression: false, autoGainControl: false },
-    });
-    const src = audio.ac.createMediaStreamSource(stream);
-    const an = audio.ac.createAnalyser();
-    an.fftSize = 1024;
-    src.connect(an);                                  // analysed only, never played back
-    mic = { an, buf: new Float32Array(an.fftSize) };
-  } catch (e) {
-    console.warn("No microphone; voice thrust off", e);
+// ---------- Greek rain: falling columns behind the world ----------
+// Sparse and slow at sea; denser and faster with altitude and heat; near the sun the
+// letters glitch into Latin and symbols. Each column has a depth: size + brightness.
+const RAIN_SIZES = [11, 15, 21];
+function rainDensity() { return mode === "melt" ? 0.6 : clamp(altitude * 0.6 + heat * 0.6, 0, 1); }
+function sunGlitch() { return clamp((altitude - 0.6) / 0.4, 0, 1) * (0.3 + 0.7 * sunAim) * 0.6; }
+function rainChar() {
+  return Math.random() < sunGlitch() ? LATIN[(Math.random() * LATIN.length) | 0] : GREEK[(Math.random() * GREEK.length) | 0];
+}
+function newColumn(anywhere) {
+  const d = (Math.random() * 3) | 0, size = RAIN_SIZES[d];
+  const len = 6 + ((Math.random() * 12) | 0);
+  return {
+    x: Math.round((Math.random() * W) / 18) * 18 + 9, y: anywhere ? Math.random() * H : -Math.random() * 300,
+    d, size, alpha: [0.06, 0.11, 0.18][d], v: [45, 75, 115][d] * (0.8 + Math.random() * 0.4),
+    chars: Array.from({ length: len }, rainChar), t: 0, swap: 0.1 + Math.random() * 0.3,
+  };
+}
+function updateRain(dt) {
+  const dens = rainDensity(), want = Math.round(lerp(RAIN_MIN, RAIN_MAX, dens)), speed = 1 + dens * 3;
+  if (!rain.length) for (let i = 0; i < want; i++) rain.push(newColumn(true));
+  while (rain.length < want) rain.push(newColumn(false));
+  for (const c of rain) {
+    c.y += c.v * speed * dt;
+    c.t += dt;
+    if (c.t > c.swap) {                                   // characters keep changing
+      c.t = 0; c.swap = (0.05 + Math.random() * 0.3) / (1 + dens * 2);
+      c.chars[(Math.random() * c.chars.length) | 0] = rainChar();
+    }
   }
+  // Columns that leave the bottom start again at the top, or retire if there are too many
+  rain = rain.filter(c => {
+    if (c.y - c.chars.length * c.size < H) return true;
+    if (rain.length > want) return false;
+    Object.assign(c, newColumn(false));
+    return true;
+  });
+}
+function drawRain() {
+  ctx.save();
+  ctx.fillStyle = RED;
+  ctx.textAlign = "center"; ctx.textBaseline = "middle";
+  const g = sunGlitch();
+  for (let d = 0; d < RAIN_SIZES.length; d++) {          // one font per depth layer
+    ctx.font = `${RAIN_SIZES[d]}px system-ui, sans-serif`;
+    for (const c of rain) {
+      if (c.d !== d) continue;
+      for (let i = 0; i < c.chars.length; i++) {
+        const y = c.y - i * c.size;
+        if (y < -c.size || y > H + c.size) continue;
+        ctx.globalAlpha = c.alpha * (i === 0 ? 2.2 : 1 - i / c.chars.length);   // bright head, fading tail
+        const ch = g > 0 && Math.random() < g * 0.15 ? LATIN[(Math.random() * LATIN.length) | 0] : c.chars[i];
+        ctx.fillText(ch, c.x, y);
+      }
+    }
+  }
+  ctx.restore();
 }
 
-function updateMic(now) {
-  if (!mic) { voiceBoost = 0; return; }
-  mic.an.getFloatTimeDomainData(mic.buf);
-  let sum = 0;
-  for (let i = 0; i < mic.buf.length; i++) sum += mic.buf[i] * mic.buf[i];
-  const db = 10 * Math.log10(sum / mic.buf.length + 1e-10);
-  // Background level: follows quiet quickly, loud only very slowly
-  voiceFloor += (db - voiceFloor) * (db < voiceFloor ? 0.2 : 0.002);
-  const loud = clamp((db - voiceFloor - 12) / 28, 0, 1);
-  voiceLevel += (loud - voiceLevel) * 0.5;
-  voiceBoost = mode === "live" ? voiceLevel * VOICE_THRUST : 0;
-  // Shouting at the sun
-  if (mode === "live" && heat > SHOUT_HEAT && now > shoutCool) {
-    const text = voiceLevel > 0.8 ? "yes" : voiceLevel > 0.5 ? "louder" : null;
-    if (text) { shout = { text, until: now + 1200 }; shoutCool = now + 1700; whisper(); }
+// ---------- The body: two wireframe hands at the lower corners ----------
+// Built in hand-local space (right hand; y along the fingers, x across with the thumb at −x,
+// z forward), then posed and projected. Every line is either FLESH (red outline) or BONE
+// (white-red centre line). Flesh burns off from the fingertips as heat rises.
+const FINGERS = [   // knuckle position, splay, segment lengths, half-width
+  { x: -0.17,  y: 0.56, splay: -0.10, len: [0.25, 0.15, 0.11],  w: 0.045 },   // index
+  { x: -0.055, y: 0.58, splay: -0.02, len: [0.28, 0.17, 0.12],  w: 0.047 },   // middle
+  { x: 0.06,   y: 0.56, splay: 0.06,  len: [0.26, 0.16, 0.115], w: 0.044 },   // ring
+  { x: 0.165,  y: 0.51, splay: 0.15,  len: [0.20, 0.125, 0.10], w: 0.038 },   // pinky
+];
+const THUMB = { x: -0.19, y: 0.14, splay: -0.75, len: [0.20, 0.15, 0.12], w: 0.05 };
+const smooth01 = v => v * v * (3 - 2 * v);
+
+// Where each hand is and how it's held this frame. side: −1 left, +1 right.
+function handPose(now, side) {
+  const t = now / 1000;
+  const sp = clamp((fwdSpeed - SPEED_BASE) / (SPEED_ALT + SPEED_BASE), 0, 1);
+  let cover = 0, drop = 0;
+  if (mode === "melt") {                                // CRASH: up over the camera, then away
+    const ft = (now - meltStart) / 1000;
+    drop = clamp((ft - COVER_OUT_AT) / COVER_OUT, 0, 1);
+    cover = smooth01(clamp(ft / COVER_IN, 0, 1));
   }
+  const trem = heat * heat * 0.008 + (mode === "melt" ? 0.004 : 0);
+  const base = [side * HAND_BASE[0], HAND_BASE[1], HAND_BASE[2]];
+  base[1] += 0.012 * Math.sin(t * 1.3 + side * 0.4);                         // breathing
+  base[0] += Math.sin(t * 0.8 + side * 2) * 0.01 * (1 + 2 * sp) + side * 0.03 * sp;   // drift with speed
+  base[1] += Math.sin(t * 1.1 + side) * 0.008 * (1 + 2 * sp) - 0.04 * sp + (Math.random() - 0.5) * 0.004 * sp;
+  base[1] += -side * bank * 0.22;                     // bank left (bank > 0) raises the left hand
+  base[0] += (Math.random() - 0.5) * trem; base[1] += (Math.random() - 0.5) * trem;   // trembling with heat
+  const cb = [side * 0.16, -0.02, 0.45];
+  const b = base.map((v, i) => lerp(v, cb[i], cover));
+  b[1] -= drop * drop * 1.4;                          // ...they drop away just before the water
+  return {
+    base: b,
+    pitch: lerp(HAND_PITCH + 0.03 * Math.sin(t * 1.3), 0.05, cover),
+    roll: lerp(side * HAND_INWARD, side * 0.1, cover) - bank * 0.35 * (1 - cover),
+    splay: lerp(1, 3.2, cover),                       // fingers spread to see through
+    curl: (j, fi) => lerp((0.22 + 0.08 * Math.sin(t * 0.9 + fi * 0.7 + side)) * [0.8, 1, 0.7][j], 0, cover),
+  };
+}
+
+// All segments of one hand in camera space: { a, b, burn, bone, id }, plus fingertip points
+function buildHand(side, P) {
+  const segs = [], tips = [];
+  let id = 0;
+  const S = HAND_SCALE, cp = Math.cos(P.pitch), spn = Math.sin(P.pitch), cr = Math.cos(P.roll), sr = Math.sin(P.roll);
+  const X = (x, y, z) => {
+    x *= side * S; y *= S; z *= S;
+    const y1 = y * cp - z * spn, z1 = y * spn + z * cp;           // fingers tipped forward
+    return [x * cr - y1 * sr + P.base[0], x * sr + y1 * cr + P.base[1], z1 + P.base[2]];
+  };
+  const add = (a, b, u, bone) => segs.push({ a: X(...a), b: X(...b), burn: lerp(BURN_TIP, BURN_WRIST, u), bone, id: side * 1000 + id++ });
+  const F = (a, b, u) => add(a, b, u, false), B = (a, b, u) => add(a, b, u, true);
+  const palmZ = x => 0.06 * (x / 0.2) ** 2;                        // slight cup across the palm
+  const L3 = (p, q, t) => [lerp(p[0], q[0], t), lerp(p[1], q[1], t), lerp(p[2], q[2], t)];
+
+  const chain = (fg, fi, isThumb) => {
+    const splay = fg.splay * P.splay;
+    const dx = Math.sin(splay), dy = Math.cos(splay);             // along the finger
+    const sx = Math.cos(splay), sy = -Math.sin(splay);            // across it
+    const off = (p, w, z = 0) => [p[0] + sx * w, p[1] + sy * w, p[2] + z];
+    let p = [fg.x, fg.y, palmZ(fg.x)], ang = isThumb ? 0.35 : 0;
+    const u0 = isThumb ? 0.05 : 0;
+    for (let j = 0; j < 3; j++) {
+      ang += P.curl(j, fi);                                        // curl toward the palm (+z)
+      const Ln = fg.len[j];
+      const q = [p[0] + dx * Math.cos(ang) * Ln, p[1] + dy * Math.cos(ang) * Ln, p[2] + Math.sin(ang) * Ln];
+      const w0 = fg.w * (1 - 0.12 * j), w1 = fg.w * (1 - 0.12 * (j + 1));
+      const u = u0 + (2 - j) * 0.13;                               // fingertips burn first
+      F(off(p, -w0), off(q, -w1), u);                              // flesh: both sides
+      F(off(p, w0), off(q, w1), u);
+      F(off(p, -w0 * 0.7, -0.01), off(p, w0 * 0.7, -0.01), u + 0.03);   // joint crease
+      B(L3(p, q, 0.12), L3(p, q, 0.88), u);                        // bone, with a gap at each joint
+      const jr = w0 * 0.35;                                        // joint marker
+      B([p[0] - jr, p[1], p[2]], [p[0], p[1] + jr, p[2]], u); B([p[0], p[1] + jr, p[2]], [p[0] + jr, p[1], p[2]], u);
+      B([p[0] + jr, p[1], p[2]], [p[0], p[1] - jr, p[2]], u); B([p[0], p[1] - jr, p[2]], [p[0] - jr, p[1], p[2]], u);
+      if (j === 2) {
+        const tc = [q[0] + dx * Math.cos(ang) * w1 * 0.8, q[1] + dy * Math.cos(ang) * w1 * 0.8, q[2] + Math.sin(ang) * w1 * 0.8];
+        F(off(q, -w1), tc, u); F(tc, off(q, w1), u);              // fingertip
+        const n0 = L3(p, q, 0.45);                                 // fingernail, on the back
+        F(off(n0, -w1 * 0.55, -0.012), off(q, -w1 * 0.55, -0.012), u);
+        F(off(n0, w1 * 0.55, -0.012), off(q, w1 * 0.55, -0.012), u);
+        F(off(n0, -w1 * 0.55, -0.012), off(n0, w1 * 0.55, -0.012), u);
+        tips.push(X(...tc));
+      }
+      p = q;
+    }
+  };
+  FINGERS.forEach((fg, i) => chain(fg, i, false));
+  chain(THUMB, 4, true);
+
+  // Palm: knuckle ridge, sides, thumb web, wrist, forearm (flesh)
+  const P3 = (x, y, dz = 0) => [x, y, palmZ(x) + dz];
+  const kn = FINGERS.map(f => P3(f.x, f.y, -0.02));
+  for (let i = 1; i < kn.length; i++) F(kn[i - 1], kn[i], 0.42);
+  F(P3(-0.215, 0.5), kn[0], 0.45); F(kn[3], P3(0.205, 0.47), 0.45);
+  F(P3(-0.215, 0.5), P3(-0.205, 0.27), 0.55);
+  F(P3(-0.205, 0.27), P3(THUMB.x + 0.03, THUMB.y + 0.1), 0.6);    // thumb web
+  F(P3(0.205, 0.47), P3(0.19, 0.12), 0.62);
+  F(P3(0.19, 0.12), P3(0.17, 0), 0.75);
+  F(P3(-0.2, 0.08), P3(-0.17, 0), 0.75);
+  F(P3(-0.17, 0), P3(0.17, 0), 0.82);                              // wrist crease
+  F(P3(-0.17, 0), [-0.21, -0.45, 0.02], 0.92); F(P3(0.17, 0), [0.22, -0.45, 0.02], 0.92);   // forearm
+  // Palm bones: metacarpals, the thumb's, a ring of carpals, radius and ulna
+  const carp = [-0.09, -0.03, 0.03, 0.09];
+  FINGERS.forEach((f, i) => B(P3(carp[i], 0.11), P3(f.x, f.y - 0.03), 0.45));
+  B(P3(THUMB.x + 0.07, 0.05), P3(THUMB.x, THUMB.y), 0.5);
+  for (let i = 0; i < 6; i++) {
+    const a1 = (i / 6) * Math.PI * 2, a2 = ((i + 1) / 6) * Math.PI * 2;
+    B([Math.cos(a1) * 0.08, 0.05 + Math.sin(a1) * 0.035, 0], [Math.cos(a2) * 0.08, 0.05 + Math.sin(a2) * 0.035, 0], 0.8);
+  }
+  B([-0.07, 0, 0], [-0.1, -0.45, 0.02], 0.95); B([0.07, 0, 0], [0.1, -0.45, 0.02], 0.95);
+  return { segs, tips };
+}
+
+// Burnt flesh breaks into two glowing pieces that tumble away (screen space)
+function spawnFrag(a, b) {
+  for (let k = 0; k < 2 && frags.length < FRAG_CAP; k++) {
+    const x1 = lerp(a[0], b[0], k / 2), y1 = lerp(a[1], b[1], k / 2), x2 = lerp(a[0], b[0], (k + 1) / 2), y2 = lerp(a[1], b[1], (k + 1) / 2);
+    frags.push({ cx: (x1 + x2) / 2, cy: (y1 + y2) / 2, hx: (x2 - x1) / 2, hy: (y2 - y1) / 2,
+                 vx: (Math.random() - 0.5) * 70, vy: -20 - Math.random() * 50, spin: (Math.random() - 0.5) * 8,
+                 life: 0, max: 0.8 + Math.random() * 0.8 });
+  }
+}
+function updateFrags(dt) {
+  frags = frags.filter(f => {
+    f.life += dt;
+    f.vy += 260 * dt; f.cx += f.vx * dt; f.cy += f.vy * dt;
+    const c = Math.cos(f.spin * dt), s = Math.sin(f.spin * dt), hx = f.hx;
+    f.hx = hx * c - f.hy * s; f.hy = hx * s + f.hy * c;
+    return f.life < f.max;
+  });
+}
+
+// Project, burn and draw both hands, then the falling fragments
+function drawBody(now) {
+  const fleshP = Array.from({ length: WIRE_LEVELS }, () => new Path2D());
+  const boneP = Array.from({ length: WIRE_LEVELS }, () => new Path2D());
+  const charP = new Path2D();
+  const proj = c => { const z = Math.max(0.2, c[2]); return [W / 2 + c[0] * FOCAL / z, H / 2 - c[1] * FOCAL / z, z]; };
+  const depth = z => clamp(1.15 - (z - 0.7) * 0.9, 0.3, 1);      // depth fade, like the world
+  const lvl = b => Math.round(clamp(b, 0, 1) * (WIRE_LEVELS - 1));
+  handTips = []; handPtsScreen = [];
+  for (const side of [-1, 1]) {
+    const { segs, tips } = buildHand(side, handPose(now, side));
+    for (const tp of tips) { const s = proj(tp); handTips.push({ x: s[0], y: s[1] }); }
+    for (const sg of segs) {
+      const a = proj(sg.a), b = proj(sg.b), d = depth((a[2] + b[2]) / 2), f = heat - sg.burn;
+      if (sg.bone) {                                  // bones show where the flesh has gone
+        const reveal = clamp((f + 0.06) / 0.12, 0, 1);
+        if (reveal <= 0.02) continue;
+        const p = boneP[lvl(d * reveal)]; p.moveTo(a[0], a[1]); p.lineTo(b[0], b[1]);
+        continue;
+      }
+      if (f >= 0) {                                   // burnt away
+        if (!burnt.has(sg.id)) { burnt.add(sg.id); spawnFrag(a, b); }
+        continue;
+      }
+      if (f < -0.12) burnt.delete(sg.id);             // cooled: the flesh grows back
+      if (f > -0.08) {                                // charring: flickers and darkens first
+        if (Math.random() < ((f + 0.08) / 0.08) * 0.5) continue;
+        charP.moveTo(a[0], a[1]); charP.lineTo(b[0], b[1]);
+        continue;
+      }
+      const p = fleshP[lvl(d)]; p.moveTo(a[0], a[1]); p.lineTo(b[0], b[1]);
+      if (Math.random() < 0.04) handPtsScreen.push({ x: a[0], y: a[1] });
+    }
+  }
+  ctx.save();
+  ctx.lineCap = "round";
+  for (let i = 0; i < WIRE_LEVELS; i++) {
+    const t = i / (WIRE_LEVELS - 1);
+    ctx.lineWidth = 1 + t * 1.2;
+    ctx.globalAlpha = 0.2 + 0.8 * t;
+    ctx.strokeStyle = RED; ctx.stroke(fleshP[i]);
+    ctx.strokeStyle = BONE; ctx.stroke(boneP[i]);
+  }
+  ctx.globalAlpha = 0.55 + Math.random() * 0.4;
+  ctx.lineWidth = 1.6; ctx.strokeStyle = CHAR; ctx.stroke(charP);
+  ctx.strokeStyle = CHAR; ctx.lineWidth = 1.4;
+  for (const f of frags) {                            // embers, cooling as they fall
+    ctx.globalAlpha = 1 - f.life / f.max;
+    ctx.beginPath(); ctx.moveTo(f.cx - f.hx, f.cy - f.hy); ctx.lineTo(f.cx + f.hx, f.cy + f.hy); ctx.stroke();
+  }
+  ctx.restore();
+}
+
+// Hard turns and dives shed a few feathers off the hands
+function spawnFeathers(dt) {
+  if (!handPtsScreen.length || feathers.length >= FEATHER_CAP) return;
+  const rate = Math.max(0, Math.abs(yawRate) - 0.5) * 4 + thrustEff * 2;
+  if (Math.random() >= rate * dt) return;
+  const p = handPtsScreen[(Math.random() * handPtsScreen.length) | 0];
+  feathers.push({
+    x: p.x, y: p.y, vx: -yawRate * 120 + (Math.random() - 0.5) * 40, vy: -20 + Math.random() * 30,
+    ph: Math.random() * 6.28, life: 0, max: 1.4 + Math.random() * 1.2, size: 1.4 + Math.random() * 1.2,
+  });
 }
 function drawSunWithLies(now, sun) {
   if (!lie || sun.r < 2) { drawSun(now, sun); return; }
@@ -1570,13 +1743,13 @@ function drawWorld(now, dt, sun) {
 
 // ---------- Wax ----------
 function spawnWax(dt) {
-  if (heat < 0.04 || !handPts.length) return;
+  if (heat < 0.04 || !handTips.length) return;
   const rate = heat * heat * 6;           // drops per second, per fingertip
-  for (const pts of handPts) for (const i of TIPS) {
+  for (const tip of handTips) {
     if (wax.length >= WAX_CAP) return;
     if (Math.random() < rate * dt) {
       wax.push({
-        x: pts[i].x + (Math.random() - 0.5) * 4, y: pts[i].y,
+        x: tip.x + (Math.random() - 0.5) * 4, y: tip.y,
         vx: (Math.random() - 0.5) * 30, vy: 20 + Math.random() * 60,
         size: 2 + Math.random() * 1.5 + heat, c: WAX_COLORS[(Math.random() * WAX_COLORS.length) | 0], life: 0,
       });
@@ -1612,37 +1785,6 @@ function drawFeathers(dt) {
   ctx.globalAlpha = 1;
 }
 
-// ---------- Body ----------
-function drawHands() {
-  // Short fading trails from the last few detection frames
-  ctx.fillStyle = HAND_BLUE;
-  const n = trailHist.length;
-  for (let k = 0; k < n - 1; k++) {
-    const age = n - 1 - k;                          // 1 = most recent
-    const s = Math.max(2, 7 - age * 1.1);
-    ctx.globalAlpha = 0.4 * (1 - age / (TRAIL_FRAMES + 1));
-    for (const pts of trailHist[k]) for (const p of pts) ctx.fillRect(p.x - s / 2, p.y - s / 2, s, s);
-  }
-  ctx.globalAlpha = 1;
-  // Current dots, big (they're your fists, right in front of you): dark outline, then blue
-  ctx.fillStyle = HAND_OUTLINE;
-  for (const pts of handPts) for (const p of pts) ctx.fillRect(p.x - 7, p.y - 7, 14, 14);
-  ctx.fillStyle = HAND_BLUE;
-  for (const pts of handPts) for (const p of pts) ctx.fillRect(p.x - 4.5, p.y - 4.5, 9, 9);
-}
-
-function drawFalling(dt, t) {
-  const fade = clamp(1 - t / MELT_TIME, 0, 1);
-  for (const p of falling) {
-    p.vy += 900 * dt;                 // gravity
-    p.x += p.vx * dt; p.y += p.vy * dt;
-    ctx.globalAlpha = fade * p.a;
-    ctx.fillStyle = p.c;
-    ctx.fillRect(p.x - p.size / 2, p.y - p.size / 2, p.size, p.size);
-  }
-  ctx.globalAlpha = 1;
-}
-
 function render(now, dt) {
   // Renderer failing: sometimes it just doesn't draw a new frame (the world keeps moving)
   if (stutterLeft > 0) { stutterLeft--; return; }
@@ -1650,15 +1792,16 @@ function render(now, dt) {
 
   ctx.fillStyle = "#000";
   ctx.fillRect(0, 0, W, H);
+  drawRain();                         // Greek rain, behind everything
 
   const sun = sunState(now);
 
   if (mode === "melt") {
     const t = (now - meltStart) / 1000;
     drawWorld(now, dt, sun);
+    drawBody(now);                    // CRASH: bones over the camera; you fall through the gaps
     drawWax(dt);
     drawFeathers(dt);
-    drawFalling(dt, t);
     drawVisor();                      // the drops slide off as you fall
     // Just before the water, one line (and its whisper)
     if (t >= FALL_TEXT_AT) {
@@ -1670,12 +1813,11 @@ function render(now, dt) {
 
   drawWorld(now, dt, sun);
   tearFrame();                        // lines tear and offset at high heat
+  drawBody(now);                      // the hands, burning to the bone as heat rises
   drawWax(dt);
   drawFeathers(dt);
-  drawHands();                        // always visible inside the glow
   drawVisor();                        // wax on the lens, over everything
   if (mode === "live" && now < lieTextUntil) caption("that's not the sun", Math.min(1, (lieTextUntil - now) / 600), H * 0.6);
-  if (mode === "live" && shout && now < shout.until) caption(shout.text, Math.min(1, (shout.until - now) / 400), H * 0.3);
 }
 
 // ============================================================
@@ -1686,12 +1828,6 @@ function loop() {
   const now = performance.now();
   const dt = Math.min((now - lastFrame) / 1000, 0.1);
   lastFrame = now;
-
-  if (mode !== "melt" && video.readyState >= 2 && video.currentTime !== lastVideoTime) {
-    lastVideoTime = video.currentTime;
-    frameNo++;
-    detect(now);
-  }
   step(now, dt);
   render(now, dt);
 }
@@ -1699,40 +1835,15 @@ function loop() {
 // ============================================================
 // Setup
 // ============================================================
-async function createTask(Cls, fileset, opts) {
-  const make = delegate => Cls.createFromOptions(fileset, {
-    ...opts, baseOptions: { ...opts.baseOptions, delegate }
-  });
-  try { return await make("GPU"); }
-  catch (e) { console.warn("GPU delegate failed, using CPU", e); return await make("CPU"); }
-}
-
-async function startCamera() {
-  const stream = await navigator.mediaDevices.getUserMedia({
-    audio: false,
-    video: { facingMode: "user", width: { ideal: 640 }, height: { ideal: 480 } },
-  });
-  video.srcObject = stream;
-  await video.play();
-}
-
 $("reach").onclick = async () => {
   const btn = $("reach");
   btn.disabled = true;
   try {
+    const motion = requestMotion();   // first: iOS only allows the permission prompt inside the tap
+    recalibrate();                    // "level" = however the phone is held right now
     audio = initAudio();              // must happen inside the tap
     await audio.ac.resume();
-    btn.textContent = "Camera…";
-    await startCamera();
-    btn.textContent = "Microphone…";
-    await startMic();                 // optional: denied or missing just means no voice thrust
-    btn.textContent = "Loading…";
-    const fileset = await FilesetResolver.forVisionTasks(WASM_URL);
-    handLm = await createTask(HandLandmarker, fileset, {
-      baseOptions: { modelAssetPath: HAND_MODEL },
-      runningMode: "VIDEO", numHands: 2,
-      minHandDetectionConfidence: .5, minHandPresenceConfidence: .5, minTrackingConfidence: .5,
-    });
+    await motion;
 
     // One combined stream for every flight's recording
     if (canvas.captureStream) {
@@ -1747,7 +1858,7 @@ $("reach").onclick = async () => {
     loop();
   } catch (e) {
     console.error(e);
-    btn.textContent = (e.name === "NotAllowedError" ? "Camera blocked" : "Error") + " · retry";
+    btn.textContent = "Error · retry";
     btn.disabled = false;
   }
 };
@@ -1756,12 +1867,11 @@ $("save").onclick = saveFlight;
 
 $("again").onclick = () => {
   $("results").classList.add("hidden");
-  altitude = 0; heat = 0;
-  falling = []; wax = []; feathers = []; trailHist = []; figures = []; visorDrops = [];
-  lie = null; lieTextUntil = 0; shout = null; tilt = null;
-  sizeSamples = 0; thrust = thrustTarget = 0;   // relearn neutral hand size for thrust
+  altitude = 0; altVel = 0; heat = 0; seaSince = 0;
+  wax = []; feathers = []; figures = []; visorDrops = []; frags = []; burnt.clear();
+  lie = null; lieTextUntil = 0; tilt = null;
+  recalibrate();                      // "level" = however the phone is held when you tap
   releaseVoice();                     // drop any leftover melt automation
-  lastHandTime = performance.now();
   mode = "live";
 };
 
