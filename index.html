@@ -146,6 +146,24 @@ const FACE_FROM = 0.75;               // sun size (of max) where the face starts
 const LIE_HEAT = 0.75;                // anomalies only above this heat
 const LIE_EVERY = 4;                  // average seconds between them
 
+// Two voices
+const DRONE_FLAT = 18;                // cents: the father's drone sits flat...
+const FATHER_PULL = 12;               // ...and pulls the main tone this many cents flat (at sea)
+const SUN_BEAT = 1.006;               // the sun's two sines beat against each other: shimmer
+
+// Wax on the visor
+const VISOR_CAP = 40;
+const VISOR_FROM = 0.15;              // heat where drops start landing
+const VISOR_RATE = 3;                 // drops / s at full heat
+
+// The renderer fails at high heat
+const GLITCH_FROM = 0.55;             // heat where it starts; worst at full heat
+const GREEK = "αβγδεζηθικλμνξοπρστυφχψωΓΔΘΛΞΠΣΦΨΩ";
+
+// Microphone
+const VOICE_THRUST = 0.8;             // full voice adds this much thrust
+const SHOUT_HEAT = 0.6;               // the sun answers shouting above this heat
+
 // Body: the hands, drawn big at the bottom corners like fists out ahead
 const HAND_SPAN = 190;                // px from wrist to middle knuckle when drawn
 const TRAIL_FRAMES = 4;               // hand trail length, in detection frames
@@ -200,6 +218,17 @@ let ghostPath = [], lastGhostRec = 0; // the flight being recorded
 let flightOrigin = null;              // { x, z, hx, hz } at take-off; ghosts are laid out from here
 let lie = null;                       // { start, end, kind, dx, dy }: the sun lying to you
 let lieTextUntil = 0;
+let fallWhispered = false;
+
+let visorDrops = [];                  // wax on the lens
+let blurCanvas = null, blurCtx = null;
+let stutterLeft = 0;                  // frames to hold (renderer failing)
+let tilt = null;                      // { start, end, amt }: the horizon tilting on its own
+
+let mic = null;                       // { an, buf } once the microphone is on
+let voiceFloor = -60, voiceLevel = 0, voiceBoost = 0;
+let thrustEff = 0;                    // hands + voice
+let shout = null, shoutCool = 0;      // { text, until }: the sun answering
 
 // Wire scenery in world coordinates (spawned ahead along the current heading)
 const mountains = Array.from({ length: MOUNTAIN_N }, () => spawnMountain({}, 6 + Math.random() * 34));
@@ -335,7 +364,7 @@ function updateView(now, dt) {
     view.h += (lerp(CAM_H_SEA, CAM_H_TOP, Math.pow(sky, 1.2)) - view.h) * k;
     bank += (bankTarget - bank) * k;
     yawRate += (yawTarget - yawRate) * k;
-    focal += (FOCAL / (1 + FOV_WIDEN * Math.max(0, thrust)) - focal) * k;   // wider view under thrust
+    focal += (FOCAL / (1 + FOV_WIDEN * Math.max(0, thrustEff)) - focal) * k;   // wider view under thrust
     // The father keeps his distance ahead, catching up slowly so your turns sweep him across the view
     const kf = 1 - Math.exp(-dt / FATHER_FOLLOW);
     father.x += (view.x + view.hx * FATHER_AHEAD - father.x) * kf;
@@ -344,7 +373,7 @@ function updateView(now, dt) {
   view.yaw += yawRate * dt;
   view.cy = Math.cos(view.yaw); view.sy = Math.sin(view.yaw);
   view.hx = view.sy; view.hz = view.cy;
-  view.roll = bank;
+  view.roll = bank + tiltNow(now);            // the horizon sometimes tilts on its own (renderer failing)
   view.cp = Math.cos(view.pitch); view.sp = Math.sin(view.pitch);
   view.cr = Math.cos(view.roll);  view.sr = Math.sin(view.roll);
 }
@@ -406,6 +435,11 @@ function initAudio() {
     engine: ac.createOscillator(), engFilter: ac.createBiquadFilter(), engGain: ac.createGain(),
     // Falling wind: looped noise through a bandpass, silent until the long fall
     wind: ac.createBufferSource(), windFilter: ac.createBiquadFilter(), windGain: ac.createGain(),
+    // THE FATHER: a low drone one and two octaves below, tuned flat (strongest at sea)
+    drone1: ac.createOscillator(), drone2: ac.createOscillator(), droneG2: ac.createGain(), droneGain: ac.createGain(),
+    // THE SUN: a shimmering high harmonic, two beating sines with a tremolo (strongest near the sun)
+    sunV1: ac.createOscillator(), sunV2: ac.createOscillator(), sunGain: ac.createGain(),
+    sunTrem: ac.createOscillator(), sunTremDepth: ac.createGain(),
     recDest: ac.createMediaStreamDestination(),
   };
   const n = node;
@@ -460,6 +494,23 @@ function initAudio() {
   n.windGain.gain.value = 0;
   n.wind.connect(n.windFilter).connect(n.windGain).connect(n.master);
   n.wind.start();
+  n.noiseBuf = noise;                           // reused by the whispers
+
+  // The father: into the main voice chain, so the filter, reverb and melt collapse apply to him too
+  n.drone1.type = "sine"; n.drone2.type = "triangle";
+  n.drone1.detune.value = n.drone2.detune.value = -DRONE_FLAT;
+  n.droneG2.gain.value = 0.6; n.droneGain.gain.value = 0;
+  n.drone1.connect(n.droneGain);
+  n.drone2.connect(n.droneG2).connect(n.droneGain);
+  n.droneGain.connect(n.mix);
+
+  // The sun: skips the filter (like the shimmer), trembling
+  n.sunV1.type = n.sunV2.type = "sine";
+  n.sunGain.gain.value = 0;
+  n.sunTrem.frequency.value = 6.5; n.sunTremDepth.gain.value = 0;
+  n.sunV1.connect(n.sunGain); n.sunV2.connect(n.sunGain);
+  n.sunTrem.connect(n.sunTremDepth).connect(n.sunGain.gain);
+  n.sunGain.connect(n.amp);
 
   n.master.connect(n.comp);
   n.comp.connect(ac.destination);
@@ -469,9 +520,10 @@ function initAudio() {
   n.wobble.connect(n.wobblePitch).connect(n.pitchBus);
   n.wobble.connect(n.wobbleFilter).connect(n.filter.frequency);
   n.vib.connect(n.vibDepth).connect(n.pitchBus);
-  for (const o of [n.osc1, n.osc2, n.sub, n.shim]) n.pitchBus.connect(o.detune);
+  for (const o of [n.osc1, n.osc2, n.sub, n.shim, n.drone1, n.drone2, n.sunV1, n.sunV2]) n.pitchBus.connect(o.detune);
 
-  for (const o of [n.osc1, n.osc2, n.sub, n.shim, n.wobble, n.vib, n.engine]) o.start();
+  for (const o of [n.osc1, n.osc2, n.sub, n.shim, n.wobble, n.vib, n.engine,
+                   n.drone1, n.drone2, n.sunV1, n.sunV2, n.sunTrem]) o.start();
   setFreq(n, ac, ROOT_HZ, 0.01);
   return { ac, ...n };
 }
@@ -485,6 +537,10 @@ function setFreq(n, ac, hz, tc) {
   n.osc2.frequency.setTargetAtTime(hz, t, tc);
   n.sub.frequency.setTargetAtTime(hz / 2, t, tc);
   n.shim.frequency.setTargetAtTime(hz * 2, t, tc);
+  n.drone1.frequency.setTargetAtTime(hz / 2, t, tc);
+  n.drone2.frequency.setTargetAtTime(hz / 4, t, tc);
+  n.sunV1.frequency.setTargetAtTime(hz * 3, t, tc);
+  n.sunV2.frequency.setTargetAtTime(hz * 3 * SUN_BEAT, t, tc);
 }
 
 // Freeze a parameter at its current value, dropping any scheduled automation
@@ -499,6 +555,8 @@ const voiceParams = a => [
   a.wobblePitch.gain, a.wobbleFilter.gain,
   a.engine.frequency, a.engFilter.frequency, a.engGain.gain,
   a.windGain.gain, a.windFilter.frequency,
+  a.drone1.frequency, a.drone2.frequency, a.droneGain.gain,
+  a.sunV1.frequency, a.sunV2.frequency, a.sunGain.gain, a.sunTremDepth.gain,
 ];
 // Before live control resumes (e.g. "Fly again"), clear any melt automation
 function releaseVoice() {
@@ -537,10 +595,19 @@ function updateVoice(handsVisible) {
   // Loudness rises ~6 dB with heat: the moment before the melt is the loudest
   const level = BASE_GAIN * Math.pow(10, (HEAT_DB * heat) / 20);
 
+  // The father: strongest at sea, fading as you climb; he pulls the main tone slightly flat
+  const fatherAmt = lerp(1, 0.15, clamp((altitude - SEA_LINE) / (1 - SEA_LINE), 0, 1));
+  const pull = FATHER_PULL * fatherAmt;
+  // The sun: strongest high up and aimed at it
+  const sunNear = clamp((altitude - 0.5) / 0.5, 0, 1) * (0.35 + 0.65 * sunAim);
+  glide(a.droneGain.gain, 0.35 * fatherAmt, 0.2);
+  glide(a.sunGain.gain, 0.07 * sunNear, 0.15);
+  glide(a.sunTremDepth.gain, 0.035 * sunNear, 0.15);
+
   setFreq(a, a.ac, hzOf(semis), 0.06);
-  glide(a.osc1.detune, spread);
-  glide(a.osc2.detune, -spread);
-  glide(a.shim.detune, spread * 0.5);
+  glide(a.osc1.detune, spread - pull);
+  glide(a.osc2.detune, -spread - pull);
+  glide(a.shim.detune, spread * 0.5 - pull);
   glide(a.filter.frequency, cutoff, 0.12);
   glide(a.filter.Q, q, 0.2);
   glide(a.g2.gain, saw, 0.15);
@@ -557,7 +624,7 @@ function updateVoice(handsVisible) {
   glide(a.amp.gain, handsVisible ? level : 0, handsVisible ? 0.08 : 0.25);
 
   // Engine: pitch and brightness rise with speed; louder when you push forward
-  const push = Math.max(0, thrust);
+  const push = Math.max(0, thrustEff);
   glide(a.engine.frequency, 38 + fwdSpeed * 4 + push * 30, 0.08);
   glide(a.engFilter.frequency, 250 + fwdSpeed * 60 + push * 900, 0.08);
   glide(a.engGain.gain, handsVisible ? 0.035 + push * 0.08 : 0, 0.1);
@@ -577,6 +644,12 @@ function meltVoice() {
   a.osc2.frequency.exponentialRampToValueAtTime(end, t + T);
   a.sub.frequency.exponentialRampToValueAtTime(end / 2, t + T);
   a.shim.frequency.exponentialRampToValueAtTime(end * 2, t + T);
+  a.drone1.frequency.exponentialRampToValueAtTime(end / 2, t + T);   // the father falls with you
+  a.drone2.frequency.exponentialRampToValueAtTime(end / 4, t + T);
+  a.sunV1.frequency.exponentialRampToValueAtTime(end * 3, t + T);
+  a.sunV2.frequency.exponentialRampToValueAtTime(end * 3 * SUN_BEAT, t + T);
+  a.sunGain.gain.linearRampToValueAtTime(0, t + T * 0.4);            // the sun lets go first
+  a.sunTremDepth.gain.linearRampToValueAtTime(0, t + T * 0.4);
 
   // Volume collapse: -12 dB at 1s, ~-30 dB at 1.7s, near silence at 2s
   a.amp.gain.exponentialRampToValueAtTime(g0 * 0.25, t + T * 0.5);
@@ -612,9 +685,15 @@ function seaReturn() {
   a.osc2.frequency.setValueAtTime(ROOT_HZ, ts);
   a.sub.frequency.setValueAtTime(ROOT_HZ / 2, ts);
   a.shim.frequency.setValueAtTime(ROOT_HZ * 2, ts);
-  a.osc1.detune.setValueAtTime(4, ts);
-  a.osc2.detune.setValueAtTime(-4, ts);
-  a.shim.detune.setValueAtTime(2, ts);
+  a.drone1.frequency.setValueAtTime(ROOT_HZ / 2, ts);
+  a.drone2.frequency.setValueAtTime(ROOT_HZ / 4, ts);
+  a.sunV1.frequency.setValueAtTime(ROOT_HZ * 3, ts);
+  a.sunV2.frequency.setValueAtTime(ROOT_HZ * 3 * SUN_BEAT, ts);
+  a.droneGain.gain.setValueAtTime(0.35, ts);        // at sea, the father is strongest
+  a.sunGain.gain.setValueAtTime(0, ts);
+  a.osc1.detune.setValueAtTime(4 - FATHER_PULL, ts);
+  a.osc2.detune.setValueAtTime(-4 - FATHER_PULL, ts);
+  a.shim.detune.setValueAtTime(2 - FATHER_PULL, ts);
   a.filter.frequency.setValueAtTime(260, ts);
   a.filter.Q.setValueAtTime(1.2, ts);
   a.g2.gain.setValueAtTime(0.25, ts);
@@ -629,6 +708,33 @@ function seaReturn() {
 }
 
 function silence() { glide(audio.amp.gain, 0, 0.15); }
+
+// A whispered syllable for each line of text: a hiss, then a gliding vowel formant,
+// filtered noise shaped by short envelopes, with a little reverb.
+const VOWELS = [[700, 1200], [400, 2200], [300, 900], [600, 1700], [500, 1000]];
+function whisper() {
+  if (!audio) return;
+  const a = audio, ac = a.ac, t = ac.currentTime;
+  const src = ac.createBufferSource();
+  src.buffer = a.noiseBuf; src.playbackRate.value = 0.8 + Math.random() * 0.4;
+  const hiss = ac.createBiquadFilter(); hiss.type = "highpass"; hiss.frequency.value = 3500;
+  const vowel = ac.createBiquadFilter(); vowel.type = "bandpass"; vowel.Q.value = 5;
+  const F = VOWELS[(Math.random() * VOWELS.length) | 0];
+  vowel.frequency.setValueAtTime(F[0] * 1.4, t + 0.03);
+  vowel.frequency.exponentialRampToValueAtTime(F[1], t + 0.28);
+  const gH = ac.createGain(), gV = ac.createGain();
+  gH.gain.setValueAtTime(0, t);
+  gH.gain.linearRampToValueAtTime(0.07, t + 0.015);
+  gH.gain.exponentialRampToValueAtTime(0.0001, t + 0.08);
+  gV.gain.setValueAtTime(0.0001, t + 0.03);
+  gV.gain.exponentialRampToValueAtTime(0.22, t + 0.08);
+  gV.gain.exponentialRampToValueAtTime(0.0001, t + 0.34);
+  src.connect(hiss).connect(gH);
+  src.connect(vowel).connect(gV);
+  for (const g of [gH, gV]) { g.connect(a.master); g.connect(a.reverb); }
+  src.start(t, Math.random() * 1.5);
+  src.stop(t + 0.4);
+}
 
 // ============================================================
 // Recording: canvas video + the audio output in one webm
@@ -689,6 +795,7 @@ function startMelt(now) {
   meltAlt0 = altitude; meltPitch0 = view.pitch; meltH0 = view.h;
   meltX0 = view.x; meltZ0 = travel; meltYaw0 = view.yaw; meltHx = view.hx; meltHz = view.hz;
   lie = null; lieTextUntil = 0;       // all text goes silent
+  shout = null; tilt = null; stutterLeft = 0; fallWhispered = false;
   meltVoice();
   // Every body dot breaks loose and falls under gravity
   falling = handPts.flat().map(p => ({
@@ -737,7 +844,7 @@ function bigHands(raw) {
     const ax = (left ? W * 0.2 : W * 0.8) + steerOffset * W * 0.08;   // fists lean into the turn
     const ay = H - 70 + (pts[0].y - meanY) * 0.5;          // the higher hand sits a little higher
     const span = Math.hypot(pts[9].x - pts[0].x, pts[9].y - pts[0].y) || 1;
-    const s = (HAND_SPAN * (1 + 0.25 * thrust)) / span;     // pushed forward → bigger fists
+    const s = (HAND_SPAN * (1 + 0.25 * thrustEff)) / span;  // pushed forward → bigger fists
     return pts.map(p => ({ x: ax + (p.x - pts[0].x) * s, y: ay + (p.y - pts[0].y) * s }));
   });
 }
@@ -833,10 +940,14 @@ function step(now, dt) {
   if (dt > 0) climb += ((altitude - prevAlt) / dt - climb) * clamp(dt * 6, 0, 1);
   prevAlt = altitude;
 
+  // Thrust = hands (push / pull) + your voice
+  updateMic(now);
+  thrustEff = clamp(thrust + voiceBoost, -1, 1);
+
   // Always flying forward along the heading: base speed, faster with altitude,
   // times thrust (push forward) or brake (pull back). The melt keeps your momentum.
   if (mode !== "melt") {
-    const mult = thrust >= 0 ? 1 + THRUST_GAIN * thrust : 1 + BRAKE_GAIN * thrust;
+    const mult = thrustEff >= 0 ? 1 + THRUST_GAIN * thrustEff : 1 + BRAKE_GAIN * thrustEff;
     const target = Math.max(SPEED_BASE * 0.4, (SPEED_BASE + SPEED_ALT * altitude) * mult);
     fwdSpeed += (target - fwdSpeed) * (1 - Math.exp(-dt / CAM_TAU));
     // Banking drifts the world sideways (camera slides along -right = (-hz, +hx))
@@ -845,9 +956,11 @@ function step(now, dt) {
     view.x += view.hx * fwdSpeed * dt;
     travel += view.hz * fwdSpeed * dt;
   }
+  updateGlitch(now, dt);
   updateView(now, dt);                    // (during the long fall it places the camera itself)
   sunAim = sunAimNow();
   updateFigures(dt);
+  updateVisor(dt);
 
   if (mode === "live") {
     const visible = hands.length > 0;
@@ -1032,6 +1145,131 @@ function updateLie(now, dt) {
     lie = { start: now, end: now + dur, kind: Math.random() < 0.5 ? "double" : "drift",
             dx: (Math.random() < 0.5 ? -1 : 1) * (0.5 + Math.random() * 0.5), dy: (Math.random() - 0.5) * 0.6 };
     lieTextUntil = now + dur + 900;
+    whisper();                                        // each line of text gets a whispered syllable
+  }
+}
+
+// ---------- The renderer fails at high heat ----------
+function glitchAmt() { return mode === "live" ? clamp((heat - GLITCH_FROM) / (1 - GLITCH_FROM), 0, 1) : 0; }
+
+function updateGlitch(now, dt) {
+  const g = glitchAmt();
+  if (tilt && now > tilt.end) tilt = null;
+  if (!tilt && g > 0 && Math.random() < g * 0.25 * dt) {
+    tilt = { start: now, end: now + 600 + Math.random() * 600, amt: (Math.random() < 0.5 ? -1 : 1) * (0.1 + 0.25 * g) };
+  }
+  if (mode !== "live") tilt = null;
+}
+function tiltNow(now) {
+  if (!tilt) return 0;
+  return tilt.amt * Math.sin(clamp((now - tilt.start) / (tilt.end - tilt.start), 0, 1) * Math.PI);
+}
+// Tear: shift a few horizontal bands of the frame sideways
+function tearFrame() {
+  const g = glitchAmt();
+  if (g <= 0 || Math.random() > g * 0.25) return;
+  const n = 1 + ((Math.random() * 3 * g) | 0);
+  for (let i = 0; i < n; i++) {
+    const y = Math.random() * H, h = 4 + Math.random() * 50 * g, dx = (Math.random() - 0.5) * 160 * g;
+    ctx.drawImage(canvas, 0, y, W, h, dx, y, W, h);
+  }
+}
+// Text flickers into Greek letters
+function glitchText(s) {
+  const g = glitchAmt();
+  if (g <= 0) return s;
+  return [...s].map(c => (c !== " " && Math.random() < g * 0.3 ? GREEK[(Math.random() * GREEK.length) | 0] : c)).join("");
+}
+
+// ---------- Wax on the visor: drops land, stick, slip down; the view behind them blurs red ----------
+function updateVisor(dt) {
+  if (mode === "live" && heat > VISOR_FROM && visorDrops.length < VISOR_CAP &&
+      Math.random() < heat * heat * VISOR_RATE * dt) {
+    visorDrops.push({
+      x: Math.random() * W, y: Math.random() * H * 0.85,
+      r: (8 + Math.random() * 18) * (0.6 + heat * 0.6), vy: 0, stick: 0.3 + Math.random() * 1.5, trail: [],
+    });
+  }
+  for (const d of visorDrops) {
+    if (mode === "melt") d.vy += 2500 * dt;           // the fall clears them
+    else {
+      d.stick -= dt;
+      if (d.stick <= 0) { d.vy = 20 + Math.random() * 70 * (d.r / 20); d.stick = 0.3 + Math.random() * 1.2; }   // slip
+      else d.vy *= 1 - 3 * dt;                                                                                 // stick
+    }
+    d.y += d.vy * dt;
+    const last = d.trail[d.trail.length - 1];
+    if (d.vy > 5 && (!last || d.y - last[1] > d.r * 0.6)) { d.trail.push([d.x, d.y - d.r * 0.4]); if (d.trail.length > 6) d.trail.shift(); }
+  }
+  visorDrops = visorDrops.filter(d => d.y - d.r < H + 40);
+}
+
+function drawVisor() {
+  if (!visorDrops.length) return;
+  // Blur = a scaled-down copy of the frame, drawn back up inside the drops (cheap on phones)
+  const f = Math.round(lerp(6, 14, heat)), bw = Math.ceil(W / f), bh = Math.ceil(H / f);
+  if (!blurCanvas) { blurCanvas = document.createElement("canvas"); blurCtx = blurCanvas.getContext("2d"); }
+  if (blurCanvas.width !== bw || blurCanvas.height !== bh) { blurCanvas.width = bw; blurCanvas.height = bh; }
+  blurCtx.imageSmoothingEnabled = true; blurCtx.imageSmoothingQuality = "high";
+  blurCtx.drawImage(canvas, 0, 0, bw, bh);
+
+  const clip = new Path2D();
+  for (const d of visorDrops) {
+    clip.moveTo(d.x + d.r, d.y); clip.ellipse(d.x, d.y, d.r, d.r * 1.15, 0, 0, Math.PI * 2);
+    d.trail.forEach(([tx, ty], i) => {
+      const tr = d.r * 0.25 * (i + 1) / d.trail.length;
+      clip.moveTo(tx + tr, ty); clip.ellipse(tx, ty, tr, tr * 1.3, 0, 0, Math.PI * 2);
+    });
+  }
+  ctx.save();
+  ctx.clip(clip);
+  ctx.imageSmoothingEnabled = true;
+  ctx.drawImage(blurCanvas, 0, 0, bw, bh, -6, 10, W + 12, H + 12);   // slight lens shift / magnify
+  ctx.fillStyle = `rgba(255, 70, 20, ${0.18 + 0.25 * heat})`;          // red-orange tint
+  ctx.fillRect(0, 0, W, H);
+  ctx.restore();
+  // A thin bright rim on the upper edge of each drop
+  ctx.strokeStyle = "rgba(255, 150, 90, 0.45)"; ctx.lineWidth = 1.2;
+  ctx.beginPath();
+  for (const d of visorDrops) {
+    const a0 = Math.PI * 1.15;
+    ctx.moveTo(d.x + Math.cos(a0) * d.r, d.y + Math.sin(a0) * d.r * 1.15);
+    ctx.ellipse(d.x, d.y, d.r, d.r * 1.15, 0, a0, Math.PI * 1.85);
+  }
+  ctx.stroke();
+}
+
+// ---------- Microphone: your voice adds thrust; at high heat the sun answers shouting ----------
+async function startMic() {
+  try {
+    const stream = await navigator.mediaDevices.getUserMedia({
+      audio: { echoCancellation: true, noiseSuppression: false, autoGainControl: false },
+    });
+    const src = audio.ac.createMediaStreamSource(stream);
+    const an = audio.ac.createAnalyser();
+    an.fftSize = 1024;
+    src.connect(an);                                  // analysed only, never played back
+    mic = { an, buf: new Float32Array(an.fftSize) };
+  } catch (e) {
+    console.warn("No microphone; voice thrust off", e);
+  }
+}
+
+function updateMic(now) {
+  if (!mic) { voiceBoost = 0; return; }
+  mic.an.getFloatTimeDomainData(mic.buf);
+  let sum = 0;
+  for (let i = 0; i < mic.buf.length; i++) sum += mic.buf[i] * mic.buf[i];
+  const db = 10 * Math.log10(sum / mic.buf.length + 1e-10);
+  // Background level: follows quiet quickly, loud only very slowly
+  voiceFloor += (db - voiceFloor) * (db < voiceFloor ? 0.2 : 0.002);
+  const loud = clamp((db - voiceFloor - 12) / 28, 0, 1);
+  voiceLevel += (loud - voiceLevel) * 0.5;
+  voiceBoost = mode === "live" ? voiceLevel * VOICE_THRUST : 0;
+  // Shouting at the sun
+  if (mode === "live" && heat > SHOUT_HEAT && now > shoutCool) {
+    const text = voiceLevel > 0.8 ? "yes" : voiceLevel > 0.5 ? "louder" : null;
+    if (text) { shout = { text, until: now + 1200 }; shoutCool = now + 1700; whisper(); }
   }
 }
 function drawSunWithLies(now, sun) {
@@ -1053,7 +1291,7 @@ function caption(text, a, y = H * 0.42) {
   ctx.fillStyle = RED;
   ctx.font = "300 34px system-ui, -apple-system, 'Segoe UI', Roboto, sans-serif";
   ctx.textAlign = "center"; ctx.textBaseline = "middle";
-  ctx.fillText(text, W / 2, y);
+  ctx.fillText(glitchText(text), W / 2, y);
   ctx.restore();
 }
 
@@ -1297,8 +1535,8 @@ function drawClouds() {
 
 // ---------- Speed lines: red streaks rushing past once you're flying fast ----------
 function drawSpeedLines() {
-  const show = clamp((fwdSpeed - 6) / 6 + Math.max(0, thrust), 0, 1);   // surge under thrust
-  const len = fwdSpeed * (0.07 + 0.05 * Math.max(0, thrust));
+  const show = clamp((fwdSpeed - 6) / 6 + Math.max(0, thrustEff), 0, 1);   // surge under thrust
+  const len = fwdSpeed * (0.07 + 0.05 * Math.max(0, thrustEff));
   for (const p of speedLines) {
     if (passed(p, 0.3, 8)) spawnSpeed(p, 14 + Math.random() * 8);
     if (show <= 0) continue;
@@ -1406,6 +1644,10 @@ function drawFalling(dt, t) {
 }
 
 function render(now, dt) {
+  // Renderer failing: sometimes it just doesn't draw a new frame (the world keeps moving)
+  if (stutterLeft > 0) { stutterLeft--; return; }
+  if (Math.random() < glitchAmt() * 0.05) stutterLeft = 1 + ((Math.random() * 3) | 0);
+
   ctx.fillStyle = "#000";
   ctx.fillRect(0, 0, W, H);
 
@@ -1417,16 +1659,23 @@ function render(now, dt) {
     drawWax(dt);
     drawFeathers(dt);
     drawFalling(dt, t);
-    // Just before the water, one line
-    if (t >= FALL_TEXT_AT) caption("he also flew.", (t - FALL_TEXT_AT) / 0.5);
+    drawVisor();                      // the drops slide off as you fall
+    // Just before the water, one line (and its whisper)
+    if (t >= FALL_TEXT_AT) {
+      if (!fallWhispered) { fallWhispered = true; whisper(); }
+      caption("he also flew.", (t - FALL_TEXT_AT) / 0.5);
+    }
     return;
   }
 
   drawWorld(now, dt, sun);
+  tearFrame();                        // lines tear and offset at high heat
   drawWax(dt);
   drawFeathers(dt);
-  drawHands();                        // last: always visible inside the glow
+  drawHands();                        // always visible inside the glow
+  drawVisor();                        // wax on the lens, over everything
   if (mode === "live" && now < lieTextUntil) caption("that's not the sun", Math.min(1, (lieTextUntil - now) / 600), H * 0.6);
+  if (mode === "live" && shout && now < shout.until) caption(shout.text, Math.min(1, (shout.until - now) / 400), H * 0.3);
 }
 
 // ============================================================
@@ -1475,6 +1724,8 @@ $("reach").onclick = async () => {
     await audio.ac.resume();
     btn.textContent = "Camera…";
     await startCamera();
+    btn.textContent = "Microphone…";
+    await startMic();                 // optional: denied or missing just means no voice thrust
     btn.textContent = "Loading…";
     const fileset = await FilesetResolver.forVisionTasks(WASM_URL);
     handLm = await createTask(HandLandmarker, fileset, {
@@ -1506,8 +1757,8 @@ $("save").onclick = saveFlight;
 $("again").onclick = () => {
   $("results").classList.add("hidden");
   altitude = 0; heat = 0;
-  falling = []; wax = []; feathers = []; trailHist = []; figures = [];
-  lie = null; lieTextUntil = 0;
+  falling = []; wax = []; feathers = []; trailHist = []; figures = []; visorDrops = [];
+  lie = null; lieTextUntil = 0; shout = null; tilt = null;
   sizeSamples = 0; thrust = thrustTarget = 0;   // relearn neutral hand size for thrust
   releaseVoice();                     // drop any leftover melt automation
   lastHandTime = performance.now();
