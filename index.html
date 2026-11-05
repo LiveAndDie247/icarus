@@ -1,0 +1,880 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
+<meta name="theme-color" content="#000000">
+<title>Icarus</title>
+<style>
+  * { box-sizing: border-box; margin: 0; padding: 0; }
+  html, body {
+    height: 100%; background: #000; color: #fff; overflow: hidden;
+    font-family: system-ui, -apple-system, "Segoe UI", Roboto, sans-serif;
+    touch-action: manipulation; user-select: none; -webkit-user-select: none;
+  }
+  /* Fixed 720x1280 canvas, scaled to fit the screen with letterboxing */
+  canvas { display: block; width: 100vw; height: 100vh; height: 100dvh; object-fit: contain; }
+  video { display: none; }
+
+  .screen {
+    position: fixed; inset: 0; display: flex; flex-direction: column;
+    align-items: center; justify-content: center; gap: 22px;
+  }
+  .hidden { display: none; }
+  #results { background: rgba(0, 0, 0, .72); }
+
+  button {
+    font: inherit; font-size: 18px; letter-spacing: .12em; text-transform: uppercase;
+    color: #fff; background: transparent; border: 1px solid #e0301e;
+    padding: 16px 38px; border-radius: 40px; min-width: 200px;
+    box-shadow: 0 0 24px rgba(224, 48, 30, .35);
+  }
+  button:active { background: rgba(224, 48, 30, .25); }
+  button:disabled { opacity: .45; }
+  button.blue { border-color: #3d7bff; box-shadow: 0 0 24px rgba(61, 123, 255, .3); }
+
+  #flew { font-size: 64px; font-weight: 200; letter-spacing: .04em; font-variant-numeric: tabular-nums; }
+</style>
+</head>
+<body>
+
+<canvas id="canvas" width="720" height="1280"></canvas>
+<video id="video" playsinline muted></video>
+
+<!-- First screen: one button. It unlocks audio and asks for the camera. -->
+<div id="intro" class="screen">
+  <button id="reach">Reach up</button>
+</div>
+
+<!-- After a flight: duration, Save, Fly again. Nothing else. -->
+<div id="results" class="screen hidden">
+  <div id="flew">0.0s</div>
+  <button id="save">Save</button>
+  <button id="again" class="blue">Fly again</button>
+</div>
+
+<script type="module">
+import { FilesetResolver, HandLandmarker, FaceLandmarker }
+  from "https://cdn.jsdelivr.net/npm/@mediapipe/tasks-vision@0.10.14/vision_bundle.mjs";
+
+// ============================================================
+// Constants
+// ============================================================
+const WASM_URL   = "https://cdn.jsdelivr.net/npm/@mediapipe/tasks-vision@0.10.14/wasm";
+const HAND_MODEL = "https://storage.googleapis.com/mediapipe-models/hand_landmarker/hand_landmarker/float16/1/hand_landmarker.task";
+const FACE_MODEL = "https://storage.googleapis.com/mediapipe-models/face_landmarker/face_landmarker/float16/1/face_landmarker.task";
+
+// Zones (altitude: 0 = bottom of frame, 1 = top)
+const SEA_LINE = 0.30;        // below this: the sea
+const SUN_LINE = 0.70;        // above this: the sun
+
+// Heat / melt
+const HEAT_TIME   = 4.0;      // seconds in the sun to reach full heat
+const COOL_TIME   = 3.0;      // seconds out of the sun to cool fully
+const MELT_TIME   = 2.0;      // length of the fall
+const SILENCE_TIME = 1.0;     // quiet after the fall, before the results
+const LOST_TIMEOUT = 3.0;     // seconds with no hands that end a flight
+
+// Pitch
+const ROOT_HZ = 110;          // A2: the sea tone and the bottom of the sky
+const RANGE_SEMIS = 36;       // ~3 octaves from the sea line to the top of the frame
+const PENTATONIC = [0, 2, 4, 7, 9];   // major pentatonic degrees
+const SNAP = 0.75;            // 0 = fully continuous, 1 = hard snap to the scale
+
+// Loudness / melt sound
+const BASE_GAIN = 0.32;       // voice level at zero heat
+const HEAT_DB = 6;            // extra gain at full heat (the moment before the melt)
+const MELT_OCTAVES = 2.5;     // how far the pitch falls during the melt
+const SEA_AFTER_GAIN = 0.08;  // quiet sea tone that returns after the fall
+
+// Canvas
+const W = 720, H = 1280;
+const HORIZON_Y = H * (1 - SEA_LINE);
+const SUN_X = W / 2, SUN_Y = 150;
+const SUN_MIN_R = 60;
+const SUN_MAX_R = H * 0.2 / 1.05;     // whole glow ≈ 40% of the frame at most (incl. flicker)
+
+// Particles (keep the total under ~1000)
+const DUST_N = 260;
+const TRAIL_FRAMES = 5;               // hand trail length, in detection frames
+const FEATHER_CAP = 60;
+const WAX_CAP = 140;
+const TIPS = [4, 8, 12, 16, 20];      // fingertip landmarks
+const HAND_BLUE = "rgb(90, 155, 255)";
+const HAND_OUTLINE = "rgb(3, 8, 26)";
+const WAX_COLORS = ["rgb(255, 70, 30)", "rgb(255, 105, 40)", "rgb(235, 45, 25)", "rgb(255, 135, 60)"];
+
+// ============================================================
+// DOM + state
+// ============================================================
+const $ = id => document.getElementById(id);
+const canvas = $("canvas"), ctx = canvas.getContext("2d");
+const video = $("video");
+
+let handLm = null, faceLm = null;
+let audio = null;
+let recStream = null, recorder = null, chunks = [];
+let lastBlob = null;
+
+let mode = "intro";           // intro | live | melt | results
+let altitude = 0;             // smoothed 0..1
+let heat = 0;                 // 0..1
+let hands = [];               // arrays of 21 landmarks
+let face = null;              // 478 landmarks or null
+let lastHandTime = 0;
+let flight = null;            // { start } while a flight is in progress
+let meltStart = 0, meltSunR = 0;
+let lastVideoTime = -1, frameNo = 0, lastFrame = performance.now();
+
+// Flying animation state
+const dust = Array.from({ length: DUST_N }, () => ({
+  x: Math.random() * W, y: Math.random() * H, z: 0.25 + Math.random() * 0.75,
+}));
+let dustSpeed = 0, dustTarget = 0;    // px/s, positive = downward
+let climb = 0, prevAlt = 0;           // smoothed climb rate, altitude units / s
+let handPts = [], prevHandPts = [];   // hand landmarks mapped to the canvas
+let trailHist = [];                   // last few frames of handPts
+let lastDetect = 0;
+let feathers = [], wax = [], falling = [];
+
+// Face: landmark features only, each with its own brightness
+const FACE_DOTS = (() => {
+  const idx = key => (FaceLandmarker[key] ?? []).flatMap(c => [c.start, c.end]);
+  const m = new Map();
+  const add = (list, alpha, size) => {
+    for (const i of list) if (!m.has(i) || m.get(i).alpha < alpha) m.set(i, { i, alpha, size });
+  };
+  add(idx("FACE_LANDMARKS_FACE_OVAL"), 0.22, 1.2);       // dimmest
+  add([6, 197, 195, 5, 4, 1], 0.5, 1.4);                 // sparse nose line
+  add(idx("FACE_LANDMARKS_LEFT_EYEBROW"), 0.6, 1.4);
+  add(idx("FACE_LANDMARKS_RIGHT_EYEBROW"), 0.6, 1.4);
+  add(idx("FACE_LANDMARKS_LEFT_EYE"), 1, 1.8);           // brightest
+  add(idx("FACE_LANDMARKS_RIGHT_EYE"), 1, 1.8);
+  add(idx("FACE_LANDMARKS_LIPS"), 1, 1.8);
+  return [...m.values()].sort((a, b) => a.alpha - b.alpha);
+})();
+
+const clamp = (v, a, b) => Math.min(b, Math.max(a, v));
+const lerp = (a, b, t) => a + (b - a) * t;
+
+// ============================================================
+// Pitch: continuous, soft-snapped to a major pentatonic scale
+// ============================================================
+function softSnap(semis) {
+  const oct = Math.floor(semis / 12);
+  let best = 0, bestDist = Infinity;
+  for (let o = oct - 1; o <= oct + 1; o++) {
+    for (const d of PENTATONIC) {
+      const n = o * 12 + d, dist = Math.abs(n - semis);
+      if (dist < bestDist) { best = n; bestDist = dist; }
+    }
+  }
+  return best + (semis - best) * (1 - SNAP);
+}
+const hzOf = semis => ROOT_HZ * Math.pow(2, semis / 12);
+
+// ============================================================
+// Audio: one voice. Two detuned oscillators + a sub, lowpass,
+// soft saturation, an octave shimmer, and a light reverb.
+// ============================================================
+function makeImpulse(ac, seconds = 2.8, decay = 3) {
+  const len = Math.floor(ac.sampleRate * seconds);
+  const buf = ac.createBuffer(2, len, ac.sampleRate);
+  for (let ch = 0; ch < 2; ch++) {
+    const d = buf.getChannelData(ch);
+    for (let i = 0; i < len; i++) d[i] = (Math.random() * 2 - 1) * Math.pow(1 - i / len, decay);
+  }
+  return buf;
+}
+
+function makeSaturationCurve(drive = 3) {
+  const n = 1024, curve = new Float32Array(n);
+  for (let i = 0; i < n; i++) {
+    const x = (i / (n - 1)) * 2 - 1;
+    curve[i] = Math.tanh(drive * x) / Math.tanh(drive);
+  }
+  return curve;
+}
+
+function initAudio() {
+  const ac = new (window.AudioContext || window.webkitAudioContext)();
+  const node = {
+    osc1: ac.createOscillator(), osc2: ac.createOscillator(),
+    sub: ac.createOscillator(), shim: ac.createOscillator(),
+    g1: ac.createGain(), g2: ac.createGain(), gSub: ac.createGain(), gShim: ac.createGain(),
+    mix: ac.createGain(), filter: ac.createBiquadFilter(),
+    dry: ac.createGain(), shaper: ac.createWaveShaper(), wet: ac.createGain(),
+    amp: ac.createGain(), revSend: ac.createGain(), reverb: ac.createConvolver(),
+    hallSend: ac.createGain(), hall: ac.createConvolver(),   // long reverb that opens with heat
+    master: ac.createGain(), comp: ac.createDynamicsCompressor(),
+    // Modulation: a slow "underwater" LFO and a vibrato LFO, summed on a pitch bus
+    wobble: ac.createOscillator(), wobblePitch: ac.createGain(), wobbleFilter: ac.createGain(),
+    vib: ac.createOscillator(), vibDepth: ac.createGain(), pitchBus: ac.createGain(),
+    recDest: ac.createMediaStreamDestination(),
+  };
+  const n = node;
+
+  n.osc1.type = "triangle";     // the clean, pure core
+  n.osc2.type = "sawtooth";     // brightness, brought in by the sun
+  n.sub.type  = "sine";
+  n.shim.type = "sine";         // one octave up, for shimmer
+
+  n.g1.gain.value = 0.5; n.g2.gain.value = 0; n.gSub.gain.value = 0.4; n.gShim.gain.value = 0;
+  n.filter.type = "lowpass"; n.filter.frequency.value = 300; n.filter.Q.value = 0.8;
+  n.shaper.curve = makeSaturationCurve(3); n.shaper.oversample = "2x";
+  n.dry.gain.value = 1; n.wet.gain.value = 0;
+  n.amp.gain.value = 0;
+  n.reverb.buffer = makeImpulse(ac, 2.2, 3);
+  n.hall.buffer = makeImpulse(ac, 5.5, 2);
+  n.revSend.gain.value = 0.3; n.hallSend.gain.value = 0;
+  n.master.gain.value = 0.6;
+  // Safety limiter only: high threshold so the heat swell isn't squashed
+  n.comp.threshold.value = -6; n.comp.knee.value = 6; n.comp.ratio.value = 3;
+  n.comp.attack.value = 0.005; n.comp.release.value = 0.25;
+
+  n.wobble.frequency.value = 0.3; n.wobblePitch.gain.value = 0; n.wobbleFilter.gain.value = 0;
+  n.vib.frequency.value = 5.5; n.vibDepth.gain.value = 0;
+
+  // Voice
+  n.osc1.connect(n.g1).connect(n.mix);
+  n.osc2.connect(n.g2).connect(n.mix);
+  n.sub.connect(n.gSub).connect(n.mix);
+  n.mix.connect(n.filter);
+  n.filter.connect(n.dry).connect(n.amp);
+  n.filter.connect(n.shaper).connect(n.wet).connect(n.amp);
+  n.shim.connect(n.gShim).connect(n.amp);      // shimmer skips the filter
+
+  // Output: dry + reverb → compressor → speakers and the recorder
+  n.amp.connect(n.master);
+  n.amp.connect(n.revSend).connect(n.reverb).connect(n.master);
+  n.amp.connect(n.hallSend).connect(n.hall).connect(n.master);
+  n.master.connect(n.comp);
+  n.comp.connect(ac.destination);
+  n.comp.connect(n.recDest);
+
+  // Modulation routing (cents added to every oscillator's detune)
+  n.wobble.connect(n.wobblePitch).connect(n.pitchBus);
+  n.wobble.connect(n.wobbleFilter).connect(n.filter.frequency);
+  n.vib.connect(n.vibDepth).connect(n.pitchBus);
+  for (const o of [n.osc1, n.osc2, n.sub, n.shim]) n.pitchBus.connect(o.detune);
+
+  for (const o of [n.osc1, n.osc2, n.sub, n.shim, n.wobble, n.vib]) o.start();
+  setFreq(n, ac, ROOT_HZ, 0.01);
+  return { ac, ...n };
+}
+
+// Smooth parameter change, no clicks
+const glide = (param, value, tc = 0.08) => param.setTargetAtTime(value, audio.ac.currentTime, tc);
+
+function setFreq(n, ac, hz, tc) {
+  const t = ac.currentTime;
+  n.osc1.frequency.setTargetAtTime(hz, t, tc);
+  n.osc2.frequency.setTargetAtTime(hz, t, tc);
+  n.sub.frequency.setTargetAtTime(hz / 2, t, tc);
+  n.shim.frequency.setTargetAtTime(hz * 2, t, tc);
+}
+
+// Freeze a parameter at its current value, dropping any scheduled automation
+function hold(param, t) {
+  if (param.cancelAndHoldAtTime) param.cancelAndHoldAtTime(t);
+  else { const v = param.value; param.cancelScheduledValues(t); param.setValueAtTime(v, t); }
+}
+const voiceParams = a => [
+  a.osc1.frequency, a.osc2.frequency, a.sub.frequency, a.shim.frequency,
+  a.amp.gain, a.filter.frequency, a.filter.Q, a.g2.gain, a.gSub.gain, a.gShim.gain,
+  a.wet.gain, a.dry.gain, a.revSend.gain, a.hallSend.gain, a.vibDepth.gain,
+  a.wobblePitch.gain, a.wobbleFilter.gain,
+];
+// Before live control resumes (e.g. "Fly again"), clear any melt automation
+function releaseVoice() {
+  if (!audio) return;
+  const t = audio.ac.currentTime;
+  for (const p of voiceParams(audio)) hold(p, t);
+}
+
+// Map altitude + heat to the voice, every frame
+function updateVoice(handsVisible) {
+  const a = audio;
+  let semis, cutoff, q, saw, sub, shim, rev, hall, wobP, wobF, spread, vib;
+
+  if (altitude < SEA_LINE) {
+    // SEA: one low muffled tone with a slow underwater wobble
+    semis = 0; cutoff = 260; q = 1.2; saw = 0.25; sub = 0.5; shim = 0;
+    rev = 0.4; hall = 0; wobP = 14; wobF = 140; spread = 4; vib = 0;
+  } else {
+    // SKY → SUN: pitch climbs with altitude. The sky stays pure (triangle + sine,
+    // low lowpass, no saw); the sun opens the filter and brings in the saw.
+    semis = softSnap(RANGE_SEMIS * (altitude - SEA_LINE) / (1 - SEA_LINE));
+    const sky = clamp((altitude - SEA_LINE) / (SUN_LINE - SEA_LINE), 0, 1);
+    const sun = clamp((altitude - SUN_LINE) / (1 - SUN_LINE), 0, 1);
+    const inSun = altitude >= SUN_LINE;
+    cutoff = inSun ? lerp(2200, 4500, sun) + heat * 6000 : lerp(700, 1500, sky);
+    q = inSun ? 0.7 : 0.5;
+    saw = inSun ? 0.1 + sun * 0.1 + heat * 0.3 : 0;
+    sub = inSun ? 0.2 : 0.28;
+    shim = inSun ? 0.03 + heat * 0.14 : 0;
+    rev = 0.22 + heat * 0.3;               // short room, a little wetter with heat
+    hall = Math.pow(heat, 1.5) * 0.9;      // long hall opens as heat rises
+    wobP = 0; wobF = 0;
+    spread = inSun ? 3 + heat * 24 : 0;    // detune widens with heat
+    vib = heat * heat * 38;                // pitch wobble grows near the melt
+  }
+  // Loudness rises ~6 dB with heat: the moment before the melt is the loudest
+  const level = BASE_GAIN * Math.pow(10, (HEAT_DB * heat) / 20);
+
+  setFreq(a, a.ac, hzOf(semis), 0.06);
+  glide(a.osc1.detune, spread);
+  glide(a.osc2.detune, -spread);
+  glide(a.shim.detune, spread * 0.5);
+  glide(a.filter.frequency, cutoff, 0.12);
+  glide(a.filter.Q, q, 0.2);
+  glide(a.g2.gain, saw, 0.15);
+  glide(a.gSub.gain, sub, 0.15);
+  glide(a.gShim.gain, shim, 0.15);
+  glide(a.revSend.gain, rev, 0.3);
+  glide(a.hallSend.gain, hall, 0.3);
+  glide(a.wobblePitch.gain, wobP, 0.4);
+  glide(a.wobbleFilter.gain, wobF, 0.4);
+  glide(a.vibDepth.gain, vib, 0.15);
+  glide(a.vib.frequency, 5.5 + heat * 2, 0.3);
+  glide(a.wet.gain, heat * 0.6, 0.15);     // soft saturation creeps in
+  glide(a.dry.gain, 1 - heat * 0.3, 0.15);
+  glide(a.amp.gain, handsVisible ? level : 0, handsVisible ? 0.08 : 0.25);
+}
+
+// MELT: pitch falls 2.5 octaves over MELT_TIME while the volume collapses to
+// near silence; then the sea tone fades back in, quietly.
+function meltVoice() {
+  const a = audio, t = a.ac.currentTime, T = MELT_TIME;
+  const hz = Math.max(40, a.osc1.frequency.value);
+  const g0 = Math.max(0.02, a.amp.gain.value);
+  const hallNow = a.hallSend.gain.value;
+  for (const p of voiceParams(a)) hold(p, t);
+
+  // Pitch sweep (exponential = even in octaves)
+  const end = hz * Math.pow(2, -MELT_OCTAVES);
+  a.osc1.frequency.exponentialRampToValueAtTime(end, t + T);
+  a.osc2.frequency.exponentialRampToValueAtTime(end, t + T);
+  a.sub.frequency.exponentialRampToValueAtTime(end / 2, t + T);
+  a.shim.frequency.exponentialRampToValueAtTime(end * 2, t + T);
+
+  // Volume collapse: -12 dB at 1s, ~-30 dB at 1.7s, near silence at 2s
+  a.amp.gain.exponentialRampToValueAtTime(g0 * 0.25, t + T * 0.5);
+  a.amp.gain.exponentialRampToValueAtTime(g0 * 0.03, t + T * 0.85);
+  a.amp.gain.exponentialRampToValueAtTime(0.0006, t + T);
+
+  // Timbre drains away with it
+  a.filter.frequency.exponentialRampToValueAtTime(180, t + T);
+  a.wet.gain.linearRampToValueAtTime(0, t + T * 0.5);
+  a.dry.gain.linearRampToValueAtTime(1, t + T * 0.5);
+  a.g2.gain.linearRampToValueAtTime(0, t + T * 0.7);
+  a.gShim.gain.linearRampToValueAtTime(0, t + T * 0.3);
+  a.vibDepth.gain.linearRampToValueAtTime(0, t + T * 0.3);
+  // (the hall send stays open so the fall rings out in the big space)
+
+  // Back to the sea: reset the voice while it's silent, then fade in quietly
+  const ts = t + T + 0.15;
+  a.osc1.frequency.setValueAtTime(ROOT_HZ, ts);
+  a.osc2.frequency.setValueAtTime(ROOT_HZ, ts);
+  a.sub.frequency.setValueAtTime(ROOT_HZ / 2, ts);
+  a.shim.frequency.setValueAtTime(ROOT_HZ * 2, ts);
+  a.osc1.detune.setValueAtTime(4, ts);
+  a.osc2.detune.setValueAtTime(-4, ts);
+  a.shim.detune.setValueAtTime(2, ts);
+  a.filter.frequency.setValueAtTime(260, ts);
+  a.filter.Q.setValueAtTime(1.2, ts);
+  a.g2.gain.setValueAtTime(0.25, ts);
+  a.gSub.gain.setValueAtTime(0.5, ts);
+  a.wobblePitch.gain.setValueAtTime(14, ts);
+  a.wobbleFilter.gain.setValueAtTime(140, ts);
+  a.revSend.gain.setValueAtTime(0.4, ts);
+  a.hallSend.gain.setValueAtTime(hallNow, ts);    // big space stays open through the fall
+  a.hallSend.gain.linearRampToValueAtTime(0, ts + 1.5);
+  a.amp.gain.setValueAtTime(0.0006, ts);
+  a.amp.gain.exponentialRampToValueAtTime(SEA_AFTER_GAIN, ts + 2.0);
+}
+
+function silence() { glide(audio.amp.gain, 0, 0.15); }
+
+// ============================================================
+// Recording: canvas video + the audio output in one webm
+// ============================================================
+function pickMime() {
+  const types = ["video/webm;codecs=vp9,opus", "video/webm;codecs=vp8,opus", "video/webm"];
+  return types.find(t => window.MediaRecorder?.isTypeSupported?.(t)) ?? "";
+}
+
+function startRecording() {
+  if (!window.MediaRecorder || !recStream) return;
+  chunks = []; lastBlob = null;
+  const mimeType = pickMime();
+  try {
+    recorder = new MediaRecorder(recStream, mimeType ? { mimeType, videoBitsPerSecond: 2_500_000 } : {});
+  } catch (e) { console.warn("MediaRecorder failed", e); recorder = null; return; }
+  recorder.ondataavailable = e => { if (e.data.size) chunks.push(e.data); };
+  recorder.start(1000);
+}
+
+function stopRecording() {
+  return new Promise(resolve => {
+    if (!recorder || recorder.state === "inactive") return resolve(null);
+    recorder.onstop = () => resolve(chunks.length ? new Blob(chunks, { type: recorder.mimeType || "video/webm" }) : null);
+    recorder.stop();
+  });
+}
+
+async function saveFlight() {
+  if (!lastBlob) return;
+  const secs = $("flew").textContent.replace(/[^\d.]/g, "");
+  const file = new File([lastBlob], `icarus-${secs}s.webm`, { type: lastBlob.type });
+  if (navigator.canShare?.({ files: [file] })) {
+    try { await navigator.share({ files: [file], title: "Icarus" }); return; }
+    catch (e) { if (e.name === "AbortError") return; console.warn("Share failed, downloading", e); }
+  }
+  const url = URL.createObjectURL(file);
+  const link = Object.assign(document.createElement("a"), { href: url, download: file.name });
+  document.body.appendChild(link); link.click(); link.remove();
+  setTimeout(() => URL.revokeObjectURL(url), 10_000);
+}
+
+// ============================================================
+// Flight lifecycle
+// ============================================================
+function startFlight(now) {
+  flight = { start: now };
+  startRecording();
+}
+
+function startMelt(now) {
+  mode = "melt";
+  meltStart = now;
+  flight.flown = now - flight.start;
+  meltSunR = sunRadius();
+  meltVoice();
+  // Every body dot breaks loose and falls under gravity
+  falling = currentDots().map(d => ({
+    x: d.x, y: d.y, size: d.kind === "hand" ? 4 : d.size + 0.6,
+    c: d.kind === "hand" ? HAND_BLUE : d.color, a: d.alpha,
+    vx: (Math.random() - 0.5) * 120, vy: -Math.random() * 140,
+  }));
+  trailHist = [];
+}
+
+// fromMelt: the quiet sea tone keeps playing under the results
+async function endFlight(flownMs, fromMelt = false) {
+  mode = "results";
+  if (!fromMelt) silence();
+  flight = null;
+  heat = 0;
+  $("flew").textContent = (flownMs / 1000).toFixed(1) + "s";
+  $("save").disabled = true;
+  $("save").classList.toggle("hidden", !window.MediaRecorder);
+  $("results").classList.remove("hidden");
+  lastBlob = await stopRecording();
+  $("save").disabled = !lastBlob;
+}
+
+// ============================================================
+// Detection
+// ============================================================
+// Map a normalized landmark to the 720x1280 canvas: mirrored, "cover" fit
+function mapper() {
+  const vw = video.videoWidth || 640, vh = video.videoHeight || 480;
+  const s = Math.max(W / vw, H / vh);
+  const ox = (W - vw * s) / 2, oy = (H - vh * s) / 2;
+  return p => ({ x: ox + (1 - p.x) * vw * s, y: oy + p.y * vh * s });
+}
+
+function detect(now) {
+  const res = handLm.detectForVideo(video, now);
+  hands = res.landmarks || [];
+
+  // Face every other frame keeps mobile frame rates up (visuals only)
+  if (faceLm && frameNo % 2 === 0) {
+    face = faceLm.detectForVideo(video, now).faceLandmarks?.[0] ?? null;
+  }
+
+  // Hand landmarks on the canvas, plus a short history for trails
+  const map = mapper();
+  prevHandPts = handPts;
+  handPts = hands.map(lm => lm.map(map));
+  trailHist.push(handPts);
+  if (trailHist.length > TRAIL_FRAMES + 1) trailHist.shift();
+
+  // Feathers: fast hand motion sheds a few white specks
+  const dtDet = (now - lastDetect) / 1000;
+  lastDetect = now;
+  if (mode === "live" && dtDet > 0 && dtDet < 0.15) {
+    handPts.forEach((pts, h) => {
+      const prev = prevHandPts[h];
+      if (!prev) return;
+      pts.forEach((p, j) => {
+        const q = prev[j], dx = p.x - q.x, dy = p.y - q.y, d = Math.hypot(dx, dy);
+        if (d > 260) return;                      // hand swap, not motion
+        const speed = d / dtDet;
+        if (speed > 1400 && feathers.length < FEATHER_CAP && Math.random() < Math.min(0.035, (speed - 1400) / 20000)) {
+          feathers.push({
+            x: p.x, y: p.y, vx: dx / dtDet * 0.06 + (Math.random() - 0.5) * 30, vy: dy / dtDet * 0.04,
+            ph: Math.random() * 6.28, life: 0, max: 1.4 + Math.random() * 1.2, size: 1.4 + Math.random() * 1.2,
+          });
+        }
+      });
+    });
+  }
+
+  if (hands.length) {
+    lastHandTime = now;
+    // Altitude = average wrist height, 0 = bottom of the frame, 1 = top
+    const wristY = hands.reduce((sum, lm) => sum + lm[0].y, 0) / hands.length;
+    altitude += (clamp(1 - wristY, 0, 1) - altitude) * 0.3;
+  }
+}
+
+// ============================================================
+// Game logic (per frame)
+// ============================================================
+function step(now, dt) {
+  // Climb rate (altitude units / s), smoothed
+  if (dt > 0) climb += ((altitude - prevAlt) / dt - climb) * clamp(dt * 6, 0, 1);
+  prevAlt = altitude;
+
+  // Dust: slow base drift that grows with altitude, plus the climb rate
+  if (mode === "melt") {
+    const t = (now - meltStart) / 1000;
+    dustTarget = t < MELT_TIME ? -1500 : 12;      // reverses and streaks upward
+  } else {
+    dustTarget = 12 + altitude * 90 + (hands.length ? Math.max(0, climb) * 700 : 0);
+  }
+  dustSpeed += (dustTarget - dustSpeed) * clamp(dt * 5, 0, 1);
+
+  if (mode === "live") {
+    const visible = hands.length > 0;
+    spawnWax(dt);
+
+    // Heat climbs in the sun, cools below it
+    if (visible && altitude >= SUN_LINE) heat = clamp(heat + dt / HEAT_TIME, 0, 1);
+    else heat = clamp(heat - dt / COOL_TIME, 0, 1);
+
+    if (!flight && visible && altitude > SEA_LINE) startFlight(now);
+
+    if (flight && heat >= 1) { startMelt(now); return; }
+    if (flight && now - lastHandTime > LOST_TIMEOUT * 1000) { endFlight(lastHandTime - flight.start); return; }
+
+    updateVoice(visible);
+  } else if (mode === "melt") {
+    if (now - meltStart > (MELT_TIME + SILENCE_TIME) * 1000) {
+      altitude = 0;                   // back to the sea
+      endFlight(flight.flown, true);
+    }
+  }
+}
+
+// ============================================================
+// Rendering: black, dots only, sun, horizon
+// ============================================================
+const SEA_DOT = "rgb(120, 165, 255)";
+const hotColor = () => `rgb(255, ${Math.round(lerp(255, 70, heat))}, ${Math.round(lerp(255, 40, heat))})`;
+
+// Every body dot (hands + face features), used when they all fall at the melt
+function currentDots() {
+  const dots = [], hot = hotColor();
+  for (const pts of handPts) for (const p of pts) dots.push({ x: p.x, y: p.y, size: 4, kind: "hand", alpha: 1 });
+  if (face) {
+    const map = mapper();
+    for (const f of FACE_DOTS) {
+      const lm = face[f.i];
+      if (!lm) continue;
+      const p = map(lm);
+      dots.push({ x: p.x, y: p.y, size: f.size, kind: "face", alpha: f.alpha, color: p.y > HORIZON_Y ? SEA_DOT : hot });
+    }
+  }
+  return dots;
+}
+
+// ---------- Sun ----------
+function sunRadius() {
+  return lerp(SUN_MIN_R, SUN_MAX_R, clamp(altitude * 0.75 + heat * 0.25, 0, 1));
+}
+
+function sunState(now) {
+  if (mode === "melt") {
+    // Shrinks away upward over the fall
+    const u = clamp((now - meltStart) / 1000 / MELT_TIME, 0, 1);
+    return { x: SUN_X, y: SUN_Y - 280 * u * u, r: meltSunR * Math.pow(1 - u, 1.6), flare: 1 - u * 0.6 };
+  }
+  return { x: SUN_X, y: SUN_Y, r: sunRadius(), flare: heat };
+}
+
+function drawSun(now, s) {
+  if (s.r < 1) return;
+  const flare = s.flare;
+  const glow = clamp(0.2 + altitude * 0.55 + flare * 0.25, 0, 1);
+  const flicker = 1 + (Math.sin(now / 90) * 0.03 + Math.sin(now / 37) * 0.02) * flare;
+  const R = s.r * flicker;
+  const g = ctx.createRadialGradient(s.x, s.y, 0, s.x, s.y, R);
+  g.addColorStop(0,   `rgba(255, ${Math.round(150 + 60 * flare)}, ${Math.round(90 + 60 * flare)}, ${glow})`);
+  g.addColorStop(0.4, `rgba(255, 70, 30, ${clamp(glow * (0.55 + 0.3 * flare), 0, 1)})`);
+  g.addColorStop(1,   "rgba(200, 20, 10, 0)");
+  ctx.fillStyle = g;
+  ctx.beginPath(); ctx.arc(s.x, s.y, R, 0, Math.PI * 2); ctx.fill();
+}
+
+function drawHorizon() {
+  ctx.fillStyle = "rgba(61, 123, 255, 0.75)";
+  ctx.fillRect(0, HORIZON_Y, W, 1);
+}
+
+// ---------- Dust field ----------
+const DUST_PALE = "rgb(200, 210, 230)", DUST_WARM = "rgb(255, 190, 140)";
+function drawDust(dt, s) {
+  const streak = Math.abs(dustSpeed) > 350;
+  const reach = s.r * 1.15;
+  let style = "";
+  for (const p of dust) {
+    // Near the sun: faster, jittery, warm, shimmering
+    const near = reach > 1 ? clamp(1 - Math.hypot(p.x - s.x, p.y - s.y) / reach, 0, 1) : 0;
+    const vy = dustSpeed * p.z * (1 + near * 2.5);
+    p.y += vy * dt;
+    if (near > 0) p.x += (Math.random() - 0.5) * 90 * near * dt;
+    if (p.y > H + 20) { p.y -= H + 40; p.x = Math.random() * W; }
+    else if (p.y < -20) { p.y += H + 40; p.x = Math.random() * W; }
+
+    let a = 0.08 + p.z * 0.22;
+    if (near > 0) a = Math.min(1, a * (1 + near * (1 + 2.5 * Math.random())));
+    const want = near > 0.05 ? DUST_WARM : DUST_PALE;
+    if (want !== style) { ctx.fillStyle = style = want; }
+    const sz = p.z < 0.6 ? 1 : 1.6;
+    ctx.globalAlpha = a;
+    ctx.fillRect(p.x, p.y, sz, sz);
+    if (streak) {
+      // Motion blur as two fading ghost specks behind the direction of travel
+      ctx.globalAlpha = a * 0.5;  ctx.fillRect(p.x, p.y - vy * 0.012, sz, sz);
+      ctx.globalAlpha = a * 0.22; ctx.fillRect(p.x, p.y - vy * 0.024, sz, sz);
+    }
+  }
+  ctx.globalAlpha = 1;
+}
+
+// ---------- Wax ----------
+function spawnWax(dt) {
+  if (heat < 0.04 || !handPts.length) return;
+  const rate = heat * heat * 6;           // drops per second, per fingertip
+  for (const pts of handPts) for (const i of TIPS) {
+    if (wax.length >= WAX_CAP) return;
+    if (Math.random() < rate * dt) {
+      wax.push({
+        x: pts[i].x + (Math.random() - 0.5) * 4, y: pts[i].y,
+        vx: (Math.random() - 0.5) * 30, vy: 20 + Math.random() * 60,
+        size: 2 + Math.random() * 1.5 + heat, c: WAX_COLORS[(Math.random() * WAX_COLORS.length) | 0], life: 0,
+      });
+    }
+  }
+}
+
+function drawWax(dt) {
+  ctx.globalAlpha = 0.9;
+  wax = wax.filter(p => {
+    p.vy += 900 * dt; p.x += p.vx * dt; p.y += p.vy * dt; p.life += dt;
+    if (p.y > H + 10 || p.life > 3) return false;
+    ctx.fillStyle = p.c;
+    ctx.fillRect(p.x - p.size / 2, p.y - p.size / 2, p.size, p.size);
+    return true;
+  });
+  ctx.globalAlpha = 1;
+}
+
+// ---------- Feathers ----------
+function drawFeathers(dt) {
+  ctx.fillStyle = "#fff";
+  feathers = feathers.filter(p => {
+    p.life += dt;
+    if (p.life > p.max) return false;
+    p.vy += 60 * dt; p.vx *= 1 - 1.5 * dt; p.vy *= 1 - 1.5 * dt;
+    p.x += p.vx * dt + Math.sin(p.life * 4 + p.ph) * 25 * dt;
+    p.y += p.vy * dt;
+    ctx.globalAlpha = 0.85 * (1 - p.life / p.max);
+    ctx.fillRect(p.x - p.size / 2, p.y - p.size / 2, p.size, p.size);
+    return true;
+  });
+  ctx.globalAlpha = 1;
+}
+
+// ---------- Body ----------
+function drawFace() {
+  if (!face) return;
+  const map = mapper(), hot = hotColor();
+  let style = "", alpha = -1;
+  for (const f of FACE_DOTS) {
+    const lm = face[f.i];
+    if (!lm) continue;
+    const p = map(lm);
+    const want = p.y > HORIZON_Y ? SEA_DOT : hot;
+    if (want !== style) ctx.fillStyle = style = want;
+    if (f.alpha !== alpha) ctx.globalAlpha = alpha = f.alpha;
+    ctx.fillRect(p.x - f.size / 2, p.y - f.size / 2, f.size, f.size);
+  }
+  ctx.globalAlpha = 1;
+}
+
+function drawHands() {
+  // Short fading trails from the last few detection frames
+  ctx.fillStyle = HAND_BLUE;
+  const n = trailHist.length;
+  for (let k = 0; k < n - 1; k++) {
+    const age = n - 1 - k;                          // 1 = most recent
+    const s = Math.max(1, 3.6 - age * 0.45);
+    ctx.globalAlpha = 0.4 * (1 - age / (TRAIL_FRAMES + 1));
+    for (const pts of trailHist[k]) for (const p of pts) ctx.fillRect(p.x - s / 2, p.y - s / 2, s, s);
+  }
+  ctx.globalAlpha = 1;
+  // Current dots: dark outline, then blue, on top of everything (incl. the sun)
+  ctx.fillStyle = HAND_OUTLINE;
+  for (const pts of handPts) for (const p of pts) ctx.fillRect(p.x - 4, p.y - 4, 8, 8);
+  ctx.fillStyle = HAND_BLUE;
+  for (const pts of handPts) for (const p of pts) ctx.fillRect(p.x - 2.5, p.y - 2.5, 5, 5);
+}
+
+function drawFalling(dt, t) {
+  const fade = clamp(1 - t / MELT_TIME, 0, 1);
+  for (const p of falling) {
+    p.vy += 900 * dt;                 // gravity
+    p.x += p.vx * dt; p.y += p.vy * dt;
+    ctx.globalAlpha = fade * p.a;
+    ctx.fillStyle = p.c;
+    ctx.fillRect(p.x - p.size / 2, p.y - p.size / 2, p.size, p.size);
+  }
+  ctx.globalAlpha = 1;
+}
+
+function render(now, dt) {
+  ctx.fillStyle = "#000";
+  ctx.fillRect(0, 0, W, H);
+
+  const sun = sunState(now);
+
+  if (mode === "melt") {
+    const t = (now - meltStart) / 1000;
+    drawSun(now, sun);
+    drawDust(dt, sun);
+    drawHorizon();
+    drawWax(dt);
+    drawFeathers(dt);
+    drawFalling(dt, t);
+    return;
+  }
+
+  // A faint red wash in the sky as it gets hot
+  if (heat > 0) {
+    const wash = ctx.createLinearGradient(0, 0, 0, HORIZON_Y);
+    wash.addColorStop(0, `rgba(180, 20, 10, ${0.22 * heat})`);
+    wash.addColorStop(1, "rgba(180, 20, 10, 0)");
+    ctx.fillStyle = wash;
+    ctx.fillRect(0, 0, W, HORIZON_Y);
+  }
+  drawSun(now, sun);
+  drawDust(dt, sun);
+  drawHorizon();
+  drawFace();
+  drawWax(dt);
+  drawFeathers(dt);
+  drawHands();                        // last: always visible inside the glow
+}
+
+// ============================================================
+// Main loop
+// ============================================================
+function loop() {
+  requestAnimationFrame(loop);
+  const now = performance.now();
+  const dt = Math.min((now - lastFrame) / 1000, 0.1);
+  lastFrame = now;
+
+  if (mode !== "melt" && video.readyState >= 2 && video.currentTime !== lastVideoTime) {
+    lastVideoTime = video.currentTime;
+    frameNo++;
+    detect(now);
+  }
+  step(now, dt);
+  render(now, dt);
+}
+
+// ============================================================
+// Setup
+// ============================================================
+async function createTask(Cls, fileset, opts) {
+  const make = delegate => Cls.createFromOptions(fileset, {
+    ...opts, baseOptions: { ...opts.baseOptions, delegate }
+  });
+  try { return await make("GPU"); }
+  catch (e) { console.warn("GPU delegate failed, using CPU", e); return await make("CPU"); }
+}
+
+async function startCamera() {
+  const stream = await navigator.mediaDevices.getUserMedia({
+    audio: false,
+    video: { facingMode: "user", width: { ideal: 640 }, height: { ideal: 480 } },
+  });
+  video.srcObject = stream;
+  await video.play();
+}
+
+$("reach").onclick = async () => {
+  const btn = $("reach");
+  btn.disabled = true;
+  try {
+    audio = initAudio();              // must happen inside the tap
+    await audio.ac.resume();
+    btn.textContent = "Camera…";
+    await startCamera();
+    btn.textContent = "Loading…";
+    const fileset = await FilesetResolver.forVisionTasks(WASM_URL);
+    handLm = await createTask(HandLandmarker, fileset, {
+      baseOptions: { modelAssetPath: HAND_MODEL },
+      runningMode: "VIDEO", numHands: 2,
+      minHandDetectionConfidence: .5, minHandPresenceConfidence: .5, minTrackingConfidence: .5,
+    });
+    try {
+      faceLm = await createTask(FaceLandmarker, fileset, {
+        baseOptions: { modelAssetPath: FACE_MODEL },
+        runningMode: "VIDEO", numFaces: 1,
+      });
+    } catch (e) {
+      console.warn("Face model failed; continuing with hands only", e);
+    }
+
+    // One combined stream for every flight's recording
+    if (canvas.captureStream) {
+      recStream = new MediaStream([
+        ...canvas.captureStream(30).getVideoTracks(),
+        ...audio.recDest.stream.getAudioTracks(),
+      ]);
+    }
+
+    $("intro").classList.add("hidden");
+    mode = "live";
+    loop();
+  } catch (e) {
+    console.error(e);
+    btn.textContent = (e.name === "NotAllowedError" ? "Camera blocked" : "Error") + " · retry";
+    btn.disabled = false;
+  }
+};
+
+$("save").onclick = saveFlight;
+
+$("again").onclick = () => {
+  $("results").classList.add("hidden");
+  altitude = 0; heat = 0;
+  falling = []; wax = []; feathers = []; trailHist = [];
+  releaseVoice();                     // drop any leftover melt automation
+  lastHandTime = performance.now();
+  mode = "live";
+};
+
+// Browsers may suspend audio in the background; wake it on return
+document.addEventListener("visibilitychange", () => {
+  if (!document.hidden && audio) audio.ac.resume();
+});
+</script>
+</body>
+</html>
