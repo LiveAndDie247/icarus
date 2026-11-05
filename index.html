@@ -94,11 +94,30 @@ const SUN_X = W / 2, SUN_Y = 150;
 const SUN_MIN_R = 60;
 const SUN_MAX_R = H * 0.2 / 1.05;     // whole glow ≈ 40% of the frame at most (incl. flicker)
 
-// Particles (keep the total under ~1000)
-const DUST_N = 260;
-const TRAIL_FRAMES = 5;               // hand trail length, in detection frames
-const FEATHER_CAP = 60;
-const WAX_CAP = 140;
+// 3D space: the sun is the vanishing point. Camera looks toward it.
+// Screen = VP + (world - camera) * FOCAL / z
+const FOCAL = 560;                    // px per world unit at z = 1
+const Z_NEAR = 0.25, Z_FAR = 7;       // dust depth range
+const SPAWN_Z = 1.6;                  // dust box is sized to fill the frame at this depth
+const CLIMB_Y = 1.2;                  // camera rises this many world units over full altitude
+const HEAD_CAM = 0.18;                // head parallax: camera shift (world units) at full head offset
+const HEAD_VP = 14;                   // head parallax: vanishing-point shift (px)
+const HORIZON_DROP = 170;             // px the horizon falls as you climb from the sea line to the top
+const HORIZON_BEND = 42;              // px the horizon bows at the edges at the very top
+const GRID_COLS = 13, GRID_ROWS = 10; // sea grid dots
+const GRID_X = 1.0, GRID_Z0 = 0.6;    // column spacing, nearest row depth (row spacing = 1)
+const CLOUD_LAYERS = [                // three parallax layers, far → near
+  { z: 5.0, clouds: 4, dots: 9,  spread: 70,  size: 1.5, alpha: 0.12, drift: 4 },
+  { z: 2.6, clouds: 3, dots: 12, spread: 110, size: 2.2, alpha: 0.16, drift: 9 },
+  { z: 1.3, clouds: 2, dots: 18, spread: 160, size: 3.0, alpha: 0.2,  drift: 18 },
+];
+
+// Particles (keep the total under ~1000):
+// dust 220 + trails 4×42 + hands 42 + face ~130 + feathers 50 + wax 110 + grid 130 + clouds 108 ≈ 960
+const DUST_N = 220;
+const TRAIL_FRAMES = 4;               // hand trail length, in detection frames
+const FEATHER_CAP = 50;
+const WAX_CAP = 110;
 const TIPS = [4, 8, 12, 16, 20];      // fingertip landmarks
 const HAND_BLUE = "rgb(90, 155, 255)";
 const HAND_OUTLINE = "rgb(3, 8, 26)";
@@ -126,11 +145,30 @@ let flight = null;            // { start } while a flight is in progress
 let meltStart = 0, meltSunR = 0;
 let lastVideoTime = -1, frameNo = 0, lastFrame = performance.now();
 
+// 3D view state (updated every frame in updateView)
+const vp = { x: SUN_X, y: SUN_Y };    // vanishing point = the sun
+const cam = { x: 0, y: 0 };           // camera offset in world units
+let viewAlt = 0;                      // altitude the camera shows (falls during the melt)
+let horizonY = HORIZON_Y;             // current horizon height at the vanishing point
+let headX = 0, headY = 0;             // smoothed head offset, -1..1
+let meltAlt0 = 0;
+let gridScroll = 0;                   // sea grid travel, in rows
+
 // Flying animation state
-const dust = Array.from({ length: DUST_N }, () => ({
-  x: Math.random() * W, y: Math.random() * H, z: 0.25 + Math.random() * 0.75,
-}));
-let dustSpeed = 0, dustTarget = 0;    // px/s, positive = downward
+const dust = Array.from({ length: DUST_N }, () => {
+  const p = { x: 0, y: 0, z: 0 };
+  spawnDust(p, Z_NEAR + Math.random() * (Z_FAR - Z_NEAR));
+  return p;
+});
+let dustSpeed = 0, dustTarget = 0;    // world units / s, positive = toward the camera
+
+// Clouds: per layer, a few dot clusters placed on a wrapping tile
+const clouds = CLOUD_LAYERS.map(L => Array.from({ length: L.clouds }, (_, k) => ({
+  u: (k + Math.random() * 0.6) / L.clouds, v: Math.random(),
+  puffs: Array.from({ length: L.dots }, () => ({
+    dx: gauss() * L.spread * 0.55, dy: gauss() * L.spread * 0.18, s: 0.7 + Math.random() * 0.6,
+  })),
+})));
 let climb = 0, prevAlt = 0;           // smoothed climb rate, altitude units / s
 let handPts = [], prevHandPts = [];   // hand landmarks mapped to the canvas
 let trailHist = [];                   // last few frames of handPts
@@ -156,6 +194,59 @@ const FACE_DOTS = (() => {
 
 const clamp = (v, a, b) => Math.min(b, Math.max(a, v));
 const lerp = (a, b, t) => a + (b - a) * t;
+
+// ============================================================
+// 3D helpers (function declarations: hoisted, used during init)
+// ============================================================
+function gauss() { return (Math.random() + Math.random() + Math.random() - 1.5) / 1.5; }
+
+// Perspective projection toward the vanishing point (the sun)
+function projX(x, z) { return vp.x + (x - cam.x) * FOCAL / z; }
+function projY(y, z) { return vp.y + (y - cam.y) * FOCAL / z; }
+
+// Place a speck at depth z, inside a box that fills the frame at SPAWN_Z.
+// Far specks therefore sit near the sun; near ones spill past the edges.
+function spawnDust(p, z) {
+  const k = SPAWN_Z / FOCAL;
+  p.z = z;
+  p.x = cam.x + (Math.random() * W * 1.2 - W * 0.1 - vp.x) * k;
+  p.y = cam.y + (Math.random() * H * 1.2 - H * 0.1 - vp.y) * k;
+}
+
+// Horizon height at screen x: drops with altitude, bows at the edges up high
+function horizonAt(x) {
+  const high = clamp((viewAlt - 0.6) / 0.4, 0, 1);
+  const u = (x - vp.x) / (W / 2);
+  return horizonY + HORIZON_BEND * high * high * u * u;
+}
+
+// Per-frame camera: altitude (or the fall), head parallax, horizon
+function updateView(now, dt) {
+  if (mode === "melt") {
+    const u = clamp((now - meltStart) / 1000 / MELT_TIME, 0, 1);
+    viewAlt = meltAlt0 * (1 - u * u);           // the camera falls back to the sea
+  } else {
+    viewAlt = altitude;
+  }
+
+  // Head parallax from the nose tip; eases back to centre without a face
+  let tx = 0, ty = 0;
+  if (face && face[1] && mode !== "melt") {
+    const p = mapper()(face[1]);
+    tx = clamp((p.x - W / 2) / (W / 2), -1, 1);
+    ty = clamp((p.y - H * 0.4) / (H / 2), -1, 1);
+  }
+  const k = clamp(dt * 4, 0, 1);
+  headX += (tx - headX) * k; headY += (ty - headY) * k;
+
+  vp.x = SUN_X - headX * HEAD_VP;
+  vp.y = SUN_Y - headY * HEAD_VP * 0.7;
+  cam.x = headX * HEAD_CAM;
+  cam.y = -viewAlt * CLIMB_Y + headY * HEAD_CAM * 0.7;
+
+  const sky = clamp((viewAlt - SEA_LINE) / (1 - SEA_LINE), 0, 1);
+  horizonY = HORIZON_Y + HORIZON_DROP * Math.pow(sky, 1.2) - headY * HEAD_VP * 0.7;
+}
 
 // ============================================================
 // Pitch: continuous, soft-snapped to a major pentatonic scale
@@ -450,6 +541,7 @@ function startMelt(now) {
   meltStart = now;
   flight.flown = now - flight.start;
   meltSunR = sunRadius();
+  meltAlt0 = altitude;
   meltVoice();
   // Every body dot breaks loose and falls under gravity
   falling = currentDots().map(d => ({
@@ -538,14 +630,16 @@ function step(now, dt) {
   if (dt > 0) climb += ((altitude - prevAlt) / dt - climb) * clamp(dt * 6, 0, 1);
   prevAlt = altitude;
 
-  // Dust: slow base drift that grows with altitude, plus the climb rate
+  // Forward speed (toward the sun): slow base drift that grows with altitude,
+  // plus the climb rate. The fall throws everything back the other way.
   if (mode === "melt") {
     const t = (now - meltStart) / 1000;
-    dustTarget = t < MELT_TIME ? -1500 : 12;      // reverses and streaks upward
+    dustTarget = t < MELT_TIME ? -6 : 0.2;
   } else {
-    dustTarget = 12 + altitude * 90 + (hands.length ? Math.max(0, climb) * 700 : 0);
+    dustTarget = 0.2 + altitude * 0.9 + (hands.length ? Math.max(0, climb) * 6 : 0);
   }
   dustSpeed += (dustTarget - dustSpeed) * clamp(dt * 5, 0, 1);
+  updateView(now, dt);
 
   if (mode === "live") {
     const visible = hands.length > 0;
@@ -585,7 +679,7 @@ function currentDots() {
       const lm = face[f.i];
       if (!lm) continue;
       const p = map(lm);
-      dots.push({ x: p.x, y: p.y, size: f.size, kind: "face", alpha: f.alpha, color: p.y > HORIZON_Y ? SEA_DOT : hot });
+      dots.push({ x: p.x, y: p.y, size: f.size, kind: "face", alpha: f.alpha, color: p.y > horizonAt(p.x) ? SEA_DOT : hot });
     }
   }
   return dots;
@@ -600,9 +694,9 @@ function sunState(now) {
   if (mode === "melt") {
     // Shrinks away upward over the fall
     const u = clamp((now - meltStart) / 1000 / MELT_TIME, 0, 1);
-    return { x: SUN_X, y: SUN_Y - 280 * u * u, r: meltSunR * Math.pow(1 - u, 1.6), flare: 1 - u * 0.6 };
+    return { x: vp.x, y: vp.y - 280 * u * u, r: meltSunR * Math.pow(1 - u, 1.6), flare: 1 - u * 0.6 };
   }
-  return { x: SUN_X, y: SUN_Y, r: sunRadius(), flare: heat };
+  return { x: vp.x, y: vp.y, r: sunRadius(), flare: heat };   // the sun sits on the vanishing point
 }
 
 function drawSun(now, s) {
@@ -619,37 +713,106 @@ function drawSun(now, s) {
   ctx.beginPath(); ctx.arc(s.x, s.y, R, 0, Math.PI * 2); ctx.fill();
 }
 
+// Horizon: thin curve that drops with altitude and bows at the edges up high
 function drawHorizon() {
-  ctx.fillStyle = "rgba(61, 123, 255, 0.75)";
-  ctx.fillRect(0, HORIZON_Y, W, 1);
+  ctx.strokeStyle = "rgba(61, 123, 255, 0.75)";
+  ctx.lineWidth = 1;
+  ctx.beginPath();
+  for (let i = 0; i <= 24; i++) {
+    const x = (i / 24) * W, y = horizonAt(x);
+    if (i) ctx.lineTo(x, y); else ctx.moveTo(x, y);
+  }
+  ctx.stroke();
 }
 
-// ---------- Dust field ----------
+// ---------- Sea: a perspective dot grid on a plane below the horizon ----------
+function drawSea(dt) {
+  gridScroll += dustSpeed * 0.5 * dt;             // flows toward you as you fly, back on the fall
+  const sky = clamp((viewAlt - SEA_LINE) / (1 - SEA_LINE), 0, 1);
+  const spread = lerp(0.5, 0.14, sky);            // rows squash toward the horizon as you climb
+  const phase = ((gridScroll % 1) + 1) % 1;
+  ctx.fillStyle = SEA_DOT;
+  for (let r = 0; r < GRID_ROWS; r++) {
+    const d = (r - phase + GRID_ROWS) % GRID_ROWS;   // 0 = nearest row, GRID_ROWS = horizon
+    const z = GRID_Z0 + d;
+    const a = 0.5 * (1 - 0.75 * d / GRID_ROWS) * clamp((GRID_ROWS - d) / 1.5, 0, 1);
+    const yOff = spread * FOCAL / z;
+    const sz = clamp(2.4 / z, 0.8, 3);
+    ctx.globalAlpha = a;
+    for (let c = 0; c < GRID_COLS; c++) {
+      const sx = projX((c - (GRID_COLS - 1) / 2) * GRID_X, z);
+      if (sx < -10 || sx > W + 10) continue;
+      const sy = horizonAt(sx) + yOff;
+      if (sy > H + 10) continue;
+      ctx.fillRect(sx - sz / 2, sy - sz / 2, sz, sz);
+    }
+  }
+  ctx.globalAlpha = 1;
+}
+
+// ---------- Clouds: three dot layers at different depths ----------
+const wrap = (v, m) => ((v % m) + m) % m;
+let cloudTime = 0;
+function drawClouds(dt) {
+  cloudTime += dt;
+  ctx.fillStyle = `rgb(${Math.round(210 + 45 * heat)}, ${Math.round(220 - 40 * heat)}, ${Math.round(240 - 90 * heat)})`;
+  const PX = W * 1.5, PY = H * 1.4;               // wrapping tile, slightly larger than the frame
+  CLOUD_LAYERS.forEach((L, li) => {
+    const k = FOCAL / L.z;                        // px per world unit: near layers move more
+    for (const c of clouds[li]) {
+      const cx = wrap(c.u * PX + L.drift * cloudTime - cam.x * k, PX) - (PX - W) / 2 + (vp.x - SUN_X);
+      const cy = wrap(c.v * PY - cam.y * k, PY) - (PY - H) / 2 + (vp.y - SUN_Y);
+      for (const p of c.puffs) {
+        const x = cx + p.dx, y = cy + p.dy;
+        const fade = clamp((horizonAt(x) - y) / 80, 0, 1);   // sky only
+        if (fade <= 0) continue;
+        const s = L.size * p.s;
+        ctx.globalAlpha = L.alpha * fade;
+        ctx.fillRect(x - s / 2, y - s / 2, s, s);
+      }
+    }
+  });
+  ctx.globalAlpha = 1;
+}
+
+// ---------- Dust field: 3D specks flowing toward / away from the camera ----------
 const DUST_PALE = "rgb(200, 210, 230)", DUST_WARM = "rgb(255, 190, 140)";
+const offscreen = (x, y) => x < -40 || x > W + 40 || y < -40 || y > H + 40;
 function drawDust(dt, s) {
-  const streak = Math.abs(dustSpeed) > 350;
   const reach = s.r * 1.15;
+  const lines = Math.abs(dustSpeed) > 1.5;        // speed lines when moving fast
   let style = "";
   for (const p of dust) {
+    let sx = projX(p.x, p.z), sy = projY(p.y, p.z);
     // Near the sun: faster, jittery, warm, shimmering
-    const near = reach > 1 ? clamp(1 - Math.hypot(p.x - s.x, p.y - s.y) / reach, 0, 1) : 0;
-    const vy = dustSpeed * p.z * (1 + near * 2.5);
-    p.y += vy * dt;
-    if (near > 0) p.x += (Math.random() - 0.5) * 90 * near * dt;
-    if (p.y > H + 20) { p.y -= H + 40; p.x = Math.random() * W; }
-    else if (p.y < -20) { p.y += H + 40; p.x = Math.random() * W; }
+    const near = reach > 1 ? clamp(1 - Math.hypot(sx - s.x, sy - s.y) / reach, 0, 1) : 0;
+    const vz = dustSpeed * (1 + near * 2);        // + = toward the camera
+    p.z -= vz * dt;
+    if (near > 0) p.x += (Math.random() - 0.5) * 90 * near * dt * p.z / FOCAL;
 
-    let a = 0.08 + p.z * 0.22;
+    // Recycle: approaching specks restart far away (near the sun),
+    // receding ones restart close to the camera
+    if (vz >= 0) {
+      if (p.z < Z_NEAR || offscreen(projX(p.x, p.z), projY(p.y, p.z))) spawnDust(p, Z_FAR * (0.75 + 0.25 * Math.random()));
+    } else if (p.z > Z_FAR) {
+      spawnDust(p, Z_NEAR + Math.random() * 0.8);
+    }
+    sx = projX(p.x, p.z); sy = projY(p.y, p.z);
+    if (offscreen(sx, sy)) continue;
+
+    const t = 1 - (p.z - Z_NEAR) / (Z_FAR - Z_NEAR);              // 1 = near, 0 = far
+    let a = (0.07 + 0.4 * t * t) * clamp((Z_FAR - p.z) / 1.2, 0, 1);
     if (near > 0) a = Math.min(1, a * (1 + near * (1 + 2.5 * Math.random())));
     const want = near > 0.05 ? DUST_WARM : DUST_PALE;
-    if (want !== style) { ctx.fillStyle = style = want; }
-    const sz = p.z < 0.6 ? 1 : 1.6;
+    if (want !== style) ctx.fillStyle = style = want;
+    const sz = clamp(1.1 / p.z, 0.8, 3.4);
     ctx.globalAlpha = a;
-    ctx.fillRect(p.x, p.y, sz, sz);
-    if (streak) {
-      // Motion blur as two fading ghost specks behind the direction of travel
-      ctx.globalAlpha = a * 0.5;  ctx.fillRect(p.x, p.y - vy * 0.012, sz, sz);
-      ctx.globalAlpha = a * 0.22; ctx.fillRect(p.x, p.y - vy * 0.024, sz, sz);
+    ctx.fillRect(sx - sz / 2, sy - sz / 2, sz, sz);
+    if (lines) {
+      // Speed lines: two fading ghost specks where the speck just was
+      const z1 = p.z + vz * 0.025, z2 = p.z + vz * 0.05;
+      if (z1 > 0.08) { ctx.globalAlpha = a * 0.5;  ctx.fillRect(projX(p.x, z1) - sz / 2, projY(p.y, z1) - sz / 2, sz, sz); }
+      if (z2 > 0.08) { ctx.globalAlpha = a * 0.22; ctx.fillRect(projX(p.x, z2) - sz / 2, projY(p.y, z2) - sz / 2, sz, sz); }
     }
   }
   ctx.globalAlpha = 1;
@@ -708,7 +871,7 @@ function drawFace() {
     const lm = face[f.i];
     if (!lm) continue;
     const p = map(lm);
-    const want = p.y > HORIZON_Y ? SEA_DOT : hot;
+    const want = p.y > horizonAt(p.x) ? SEA_DOT : hot;
     if (want !== style) ctx.fillStyle = style = want;
     if (f.alpha !== alpha) ctx.globalAlpha = alpha = f.alpha;
     ctx.fillRect(p.x - f.size / 2, p.y - f.size / 2, f.size, f.size);
@@ -755,8 +918,10 @@ function render(now, dt) {
   if (mode === "melt") {
     const t = (now - meltStart) / 1000;
     drawSun(now, sun);
-    drawDust(dt, sun);
+    drawSea(dt);
     drawHorizon();
+    drawClouds(dt);
+    drawDust(dt, sun);
     drawWax(dt);
     drawFeathers(dt);
     drawFalling(dt, t);
@@ -765,15 +930,17 @@ function render(now, dt) {
 
   // A faint red wash in the sky as it gets hot
   if (heat > 0) {
-    const wash = ctx.createLinearGradient(0, 0, 0, HORIZON_Y);
+    const wash = ctx.createLinearGradient(0, 0, 0, horizonY);
     wash.addColorStop(0, `rgba(180, 20, 10, ${0.22 * heat})`);
     wash.addColorStop(1, "rgba(180, 20, 10, 0)");
     ctx.fillStyle = wash;
-    ctx.fillRect(0, 0, W, HORIZON_Y);
+    ctx.fillRect(0, 0, W, horizonY);
   }
   drawSun(now, sun);
-  drawDust(dt, sun);
+  drawSea(dt);
   drawHorizon();
+  drawClouds(dt);
+  drawDust(dt, sun);
   drawFace();
   drawWax(dt);
   drawFeathers(dt);
