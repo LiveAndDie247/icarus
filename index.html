@@ -99,12 +99,22 @@ const NEAR = 0.15;                    // near clip plane
 const PITCH_MAX = Math.atan((H / 2 - 60) / FOCAL);   // near the sun the horizon sits at the bottom edge
 const CAM_H_SEA = 0.45, CAM_H_TOP = 4.5;             // eye height over the ground
 const SPEED_BASE = 4, SPEED_ALT = 10;                // forward speed when hovering, + extra at the top
-const BANK_MAX = 0.5;                 // radians of roll at full hand-height difference
+const BANK_MAX = 0.6;                 // radians of roll at full input
+const BANK_HEIGHT = 0.5, BANK_TILT = 0.8;            // roll from hand-height difference / from hand tilt
 const DRIFT = 7;                      // sideways world units / s per radian of bank
-const SUN_ELEV = 41 * Math.PI / 180;  // the sun: straight ahead, this far above the horizon
+const YAW_RATE = 1.3;                 // radians / s of turn with hands fully to one side
+const STEER_RANGE = 0.35;             // hand offset (fraction of width from centre) for a full turn
+const STEER_DEAD = 0.08;              // small dead zone around centre
+const THRUST_RANGE = 0.3;             // hand size ±30% from your neutral = full thrust / full brake
+const THRUST_GAIN = 1.2, BRAKE_GAIN = 0.6;           // speed × (1 + 1.2) pushed, × (1 − 0.6) pulled back
+const FOV_WIDEN = 0.35;               // field of view widens under thrust (focal / 1.35 at full)
+const CALIB_FRAMES = 20;              // detection frames used to learn your neutral hand size
+const CAM_TAU = 0.1;                  // camera easing time constant, seconds
+const SUN_ELEV = 41 * Math.PI / 180;  // the sun: fixed in the world, this far above the horizon
+const AIM_CONE = 14 * Math.PI / 180;  // heat only builds with the sun within this angle of centre
 const MELT_PITCH = -0.55, MELT_H = 0.08;             // the fall: nose down, ground rushes up
-const GRID = 1.5, GRID_ROWS = 24, GRID_HALF = 16;    // ground grid
-const VIEW_FAR = GRID * GRID_ROWS;    // depth-fade distance
+const GRID = 2, GRID_LINES = 20;      // ground grid spacing, lines per axis
+const VIEW_FAR = 36;                  // depth-fade distance
 const MOUNTAIN_N = 8, TOWER_N = 5, CLOUD_N = 4, SPEED_N = 50;
 const CLOUD_SPLIT = 5;                // clouds start parting this far ahead
 const WIRE_LEVELS = 8;                // brightness buckets for batched line drawing
@@ -141,14 +151,21 @@ let meltStart = 0, meltSunR = 0;
 let lastVideoTime = -1, frameNo = 0, lastFrame = performance.now();
 
 // Camera (updated every frame in updateView). pitch > 0 looks up; roll > 0 = banked left.
-const view = { x: 0, h: CAM_H_SEA, pitch: 0, roll: 0, cp: 1, sp: 0, cr: 1, sr: 0 };
+// yaw > 0 = heading right. The camera flies along its heading (hx, hz).
+const view = { x: 0, h: CAM_H_SEA, yaw: 0, pitch: 0, roll: 0, cy: 1, sy: 0, hx: 0, hz: 1, cp: 1, sp: 0, cr: 1, sr: 0 };
+let focal = FOCAL;                    // widens (smaller) under thrust
 let viewAlt = 0;                      // altitude the camera shows (falls during the melt)
-let travel = 0;                       // distance flown: the camera's world z
+let travel = 0;                       // the camera's world z
 let fwdSpeed = SPEED_BASE;            // world units / s, always forward
-let bank = 0, bankTarget = 0;         // roll from the hands' height difference
+let bank = 0, bankTarget = 0;         // roll from hand height difference + hand tilt
+let yawRate = 0, yawTarget = 0;       // turn rate from the hands' average x
+let thrust = 0, thrustTarget = 0;     // −1 (pulled back) .. +1 (pushed forward)
+let sizeBase = 0, sizeSamples = 0;    // your neutral hand size, learned at the start
+let steerOffset = 0;                  // −1..1, for nudging the fists toward the turn
+let sunAim = 0;                       // 1 = sun dead centre, 0 = outside the aim cone
 let meltAlt0 = 0, meltPitch0 = 0, meltH0 = CAM_H_SEA;
 
-// Wire scenery in world coordinates (distance ahead = z - travel)
+// Wire scenery in world coordinates (spawned ahead along the current heading)
 const mountains = Array.from({ length: MOUNTAIN_N }, () => spawnMountain({}, 6 + Math.random() * 34));
 const towers = Array.from({ length: TOWER_N }, () => spawnTower({}, 4 + Math.random() * 30));
 const cloudShapes = Array.from({ length: CLOUD_N }, (_, i) => spawnCloud({}, 8 + i * 8 + Math.random() * 4));
@@ -171,12 +188,23 @@ const lerp = (a, b, t) => a + (b - a) * t;
 // ---------- Scenery spawners (placed `ahead` units in front of the camera) ----------
 function side() { return Math.random() < 0.5 ? -1 : 1; }   // hoisted: used during init
 
-// Jagged mountain ridge at the side: profile of (u 0..1 across, h 0..1 up)
+// Put o at `ahead` units along the heading and `lat` units to the right of it
+function place(o, ahead, lat) {
+  o.x = view.x + view.hx * ahead + view.hz * lat;
+  o.z = travel + view.hz * ahead - view.hx * lat;
+  return o;
+}
+// Forward / sideways distance of a world point from the camera, along the heading
+const fwdOf = (x, z) => (x - view.x) * view.hx + (z - travel) * view.hz;
+const latOf = (x, z) => (x - view.x) * view.hz - (z - travel) * view.hx;
+
+// Jagged mountain ridge at the side, facing the heading it was spawned on:
+// profile of (u 0..1 across, h 0..1 up), laid out along (ax, az)
 function spawnMountain(m, ahead) {
-  m.z = travel + ahead;
   m.w = 4 + Math.random() * 7;
   m.h = 1.5 + Math.random() * 4.5;
-  m.x = view.x + side() * (5 + Math.random() * 16) - m.w / 2;
+  m.ax = view.hz; m.az = -view.hx;
+  place(m, ahead, side() * (5 + Math.random() * 16) - m.w / 2);
   const n = 7 + ((Math.random() * 5) | 0), peak = 1 + ((Math.random() * (n - 2)) | 0);
   m.prof = [];
   for (let i = 0; i <= n; i++) {
@@ -188,8 +216,7 @@ function spawnMountain(m, ahead) {
 
 // Lattice tower, some close enough to pass right beside you
 function spawnTower(t, ahead) {
-  t.z = travel + ahead;
-  t.x = view.x + side() * (1.5 + Math.random() * 9);
+  place(t, ahead, side() * (1.5 + Math.random() * 9));
   t.h = 2 + Math.random() * 3.5;
   t.levels = 4 + ((Math.random() * 3) | 0);
   return t;
@@ -197,8 +224,7 @@ function spawnTower(t, ahead) {
 
 // Jagged cloud outline at eye level (yRel = height relative to the camera), flattish bottom
 function spawnCloud(c, ahead) {
-  c.z = travel + ahead;
-  c.x = view.x + (Math.random() - 0.5) * 5;
+  place(c, ahead, (Math.random() - 0.5) * 5);
   c.yRel = -0.3 + Math.random() * 0.8;
   const rx = 1.5 + Math.random() * 1.5, ry = rx * (0.3 + Math.random() * 0.15);
   c.pts = [];
@@ -211,23 +237,20 @@ function spawnCloud(c, ahead) {
 }
 
 function spawnSpeed(p, ahead) {
-  p.z = travel + ahead;
-  p.x = view.x + (Math.random() - 0.5) * 10;
+  place(p, ahead, (Math.random() - 0.5) * 10);
   p.y = Math.max(0.05, view.h + (Math.random() - 0.5) * 6);
   return p;
 }
 
 // ---------- Camera projection ----------
-// World point → camera space [x, y, depth] (pitch applied), then roll on screen.
-function toCam(x, y, z) {
-  const dx = x - view.x, dy = y - view.h, dz = z - travel;
-  return [dx, dy * view.cp - dz * view.sp, dy * view.sp + dz * view.cp];
+// World offset → camera space [x, y, depth]: yaw, then pitch; roll is applied on screen.
+function dirCam(dx, dy, dz) {          // also used directly for directions (points at infinity)
+  const rx = dx * view.cy - dz * view.sy, rz = dx * view.sy + dz * view.cy;
+  return [rx, dy * view.cp - rz * view.sp, dy * view.sp + rz * view.cp];
 }
-function dirCam(dx, dy, dz) {          // a direction (point at infinity)
-  return [dx, dy * view.cp - dz * view.sp, dy * view.sp + dz * view.cp];
-}
+function toCam(x, y, z) { return dirCam(x - view.x, y - view.h, z - travel); }
 function toScreen(c) {
-  const k = FOCAL / c[2], sx = c[0] * k, sy = -c[1] * k;
+  const k = focal / c[2], sx = c[0] * k, sy = -c[1] * k;
   return [W / 2 + sx * view.cr - sy * view.sr, H / 2 + sx * view.sr + sy * view.cr];
 }
 function clipNear(a, b) {
@@ -246,13 +269,15 @@ function seg3(x1, y1, z1, x2, y2, z2, b) {
 
 // Per-frame camera: altitude pitches it up and lifts it; the hands bank it; the melt dives it
 function updateView(now, dt) {
-  const k = clamp(dt * 4, 0, 1);
+  const k = 1 - Math.exp(-dt / CAM_TAU);           // ~100 ms camera easing
   if (mode === "melt") {
     const u = clamp((now - meltStart) / 1000 / MELT_TIME, 0, 1), e = u * u;
     viewAlt = meltAlt0 * (1 - e);
     view.pitch = lerp(meltPitch0, MELT_PITCH, Math.min(1, u * 1.6));   // nose down
     view.h = lerp(meltH0, MELT_H, e);                                  // ground rushes up
     bank += (Math.sin(u * 9) * 0.3 * u - bank) * k;                    // tumbling wobble
+    yawRate += (0 - yawRate) * k * 0.3;
+    focal += (FOCAL - focal) * k;
   } else {
     viewAlt = altitude;
     const sky = clamp((viewAlt - SEA_LINE) / (1 - SEA_LINE), 0, 1);
@@ -260,7 +285,12 @@ function updateView(now, dt) {
     view.pitch += (PITCH_MAX * ease - view.pitch) * k;
     view.h += (lerp(CAM_H_SEA, CAM_H_TOP, Math.pow(sky, 1.2)) - view.h) * k;
     bank += (bankTarget - bank) * k;
+    yawRate += (yawTarget - yawRate) * k;
+    focal += (FOCAL / (1 + FOV_WIDEN * Math.max(0, thrust)) - focal) * k;   // wider view under thrust
   }
+  view.yaw += yawRate * dt;
+  view.cy = Math.cos(view.yaw); view.sy = Math.sin(view.yaw);
+  view.hx = view.sy; view.hz = view.cy;
   view.roll = bank;
   view.cp = Math.cos(view.pitch); view.sp = Math.sin(view.pitch);
   view.cr = Math.cos(view.roll);  view.sr = Math.sin(view.roll);
@@ -319,6 +349,8 @@ function initAudio() {
     // Modulation: a slow "underwater" LFO and a vibrato LFO, summed on a pitch bus
     wobble: ac.createOscillator(), wobblePitch: ac.createGain(), wobbleFilter: ac.createGain(),
     vib: ac.createOscillator(), vibDepth: ac.createGain(), pitchBus: ac.createGain(),
+    // Engine: a low filtered saw that follows speed and thrust
+    engine: ac.createOscillator(), engFilter: ac.createBiquadFilter(), engGain: ac.createGain(),
     recDest: ac.createMediaStreamDestination(),
   };
   const n = node;
@@ -357,6 +389,11 @@ function initAudio() {
   n.amp.connect(n.master);
   n.amp.connect(n.revSend).connect(n.reverb).connect(n.master);
   n.amp.connect(n.hallSend).connect(n.hall).connect(n.master);
+
+  n.engine.type = "sawtooth"; n.engine.frequency.value = 50;
+  n.engFilter.type = "lowpass"; n.engFilter.frequency.value = 400; n.engFilter.Q.value = 2;
+  n.engGain.gain.value = 0;
+  n.engine.connect(n.engFilter).connect(n.engGain).connect(n.master);
   n.master.connect(n.comp);
   n.comp.connect(ac.destination);
   n.comp.connect(n.recDest);
@@ -367,7 +404,7 @@ function initAudio() {
   n.vib.connect(n.vibDepth).connect(n.pitchBus);
   for (const o of [n.osc1, n.osc2, n.sub, n.shim]) n.pitchBus.connect(o.detune);
 
-  for (const o of [n.osc1, n.osc2, n.sub, n.shim, n.wobble, n.vib]) o.start();
+  for (const o of [n.osc1, n.osc2, n.sub, n.shim, n.wobble, n.vib, n.engine]) o.start();
   setFreq(n, ac, ROOT_HZ, 0.01);
   return { ac, ...n };
 }
@@ -393,6 +430,7 @@ const voiceParams = a => [
   a.amp.gain, a.filter.frequency, a.filter.Q, a.g2.gain, a.gSub.gain, a.gShim.gain,
   a.wet.gain, a.dry.gain, a.revSend.gain, a.hallSend.gain, a.vibDepth.gain,
   a.wobblePitch.gain, a.wobbleFilter.gain,
+  a.engine.frequency, a.engFilter.frequency, a.engGain.gain,
 ];
 // Before live control resumes (e.g. "Fly again"), clear any melt automation
 function releaseVoice() {
@@ -449,6 +487,12 @@ function updateVoice(handsVisible) {
   glide(a.wet.gain, heat * 0.6, 0.15);     // soft saturation creeps in
   glide(a.dry.gain, 1 - heat * 0.3, 0.15);
   glide(a.amp.gain, handsVisible ? level : 0, handsVisible ? 0.08 : 0.25);
+
+  // Engine: pitch and brightness rise with speed; louder when you push forward
+  const push = Math.max(0, thrust);
+  glide(a.engine.frequency, 38 + fwdSpeed * 4 + push * 30, 0.08);
+  glide(a.engFilter.frequency, 250 + fwdSpeed * 60 + push * 900, 0.08);
+  glide(a.engGain.gain, handsVisible ? 0.035 + push * 0.08 : 0, 0.1);
 }
 
 // MELT: pitch falls 2.5 octaves over MELT_TIME while the volume collapses to
@@ -479,6 +523,9 @@ function meltVoice() {
   a.g2.gain.linearRampToValueAtTime(0, t + T * 0.7);
   a.gShim.gain.linearRampToValueAtTime(0, t + T * 0.3);
   a.vibDepth.gain.linearRampToValueAtTime(0, t + T * 0.3);
+  // Engine dies with the melt: pitch sags, level collapses
+  a.engine.frequency.exponentialRampToValueAtTime(25, t + T);
+  a.engGain.gain.setTargetAtTime(0, t, T / 4);
   // (the hall send stays open so the fall rings out in the big space)
 
   // Back to the sea: reset the voice while it's silent, then fade in quietly
@@ -603,10 +650,10 @@ function bigHands(raw) {
   const leftIdx = raw.length === 2 ? (raw[0][0].x < raw[1][0].x ? 0 : 1) : -1;
   return raw.map((pts, i) => {
     const left = leftIdx >= 0 ? i === leftIdx : pts[0].x < W / 2;
-    const ax = left ? W * 0.2 : W * 0.8;
+    const ax = (left ? W * 0.2 : W * 0.8) + steerOffset * W * 0.08;   // fists lean into the turn
     const ay = H - 70 + (pts[0].y - meanY) * 0.5;          // the higher hand sits a little higher
     const span = Math.hypot(pts[9].x - pts[0].x, pts[9].y - pts[0].y) || 1;
-    const s = HAND_SPAN / span;
+    const s = (HAND_SPAN * (1 + 0.25 * thrust)) / span;     // pushed forward → bigger fists
     return pts.map(p => ({ x: ax + (p.x - pts[0].x) * s, y: ay + (p.y - pts[0].y) * s }));
   });
 }
@@ -619,17 +666,10 @@ function detect(now) {
   const map = mapper();
   prevRawPts = rawPts;
   rawPts = hands.map(lm => lm.map(map));
+  steerInput(now);
   handPts = bigHands(rawPts);
   trailHist.push(handPts);
   if (trailHist.length > TRAIL_FRAMES + 1) trailHist.shift();
-
-  // Bank: height difference between the hands. Screen-left hand lower → bank left.
-  if (rawPts.length === 2) {
-    const [l, r] = rawPts[0][0].x < rawPts[1][0].x ? rawPts : [rawPts[1], rawPts[0]];
-    bankTarget = clamp((l[0].y - r[0].y) / (H * 0.35), -1, 1) * BANK_MAX;
-  } else {
-    bankTarget = 0;
-  }
 
   // Feathers: fast hand motion (measured on the real hands) sheds a few white specks off the big ones
   const dtDet = (now - lastDetect) / 1000;
@@ -657,8 +697,48 @@ function detect(now) {
     lastHandTime = now;
     // Altitude = average wrist height, 0 = bottom of the frame, 1 = top
     const wristY = hands.reduce((sum, lm) => sum + lm[0].y, 0) / hands.length;
-    altitude += (clamp(1 - wristY, 0, 1) - altitude) * 0.3;
+    altitude += (clamp(1 - wristY, 0, 1) - altitude) * 0.75;   // just enough to stop jitter
   }
+}
+
+// Controls from the hands, every detection frame (instant; only the camera eases)
+let lastSeen = 0;
+function steerInput(now) {
+  if (!rawPts.length) {
+    yawTarget = 0; bankTarget = 0; thrustTarget = 0;
+    thrust += (0 - thrust) * 0.6;
+    if (now - lastSeen > 1000) sizeSamples = 0;           // hands gone a while: relearn neutral size
+    return;
+  }
+  lastSeen = now;
+
+  // Yaw: average hand x. Hands left → turn left (the world swings right)
+  const avgX = rawPts.reduce((s, p) => s + p[0].x, 0) / rawPts.length;
+  let off = (avgX - W / 2) / (W * STEER_RANGE);
+  off = Math.sign(off) * Math.max(0, Math.abs(off) - STEER_DEAD) / (1 - STEER_DEAD);
+  steerOffset = clamp(off, -1, 1);
+  yawTarget = steerOffset * YAW_RATE;
+
+  // Bank: hand tilt (wrist → middle knuckle, 0 = fingers straight up; leaning left banks left)
+  // plus height difference (screen-left hand lower banks left)
+  const tilt = rawPts.reduce((s, p) => s + Math.atan2(p[9].x - p[0].x, p[0].y - p[9].y), 0) / rawPts.length;
+  let b = -tilt * BANK_TILT;
+  if (rawPts.length === 2) {
+    const [l, r] = rawPts[0][0].x < rawPts[1][0].x ? rawPts : [rawPts[1], rawPts[0]];
+    b += clamp((l[0].y - r[0].y) / (H * 0.35), -1, 1) * BANK_HEIGHT;
+  }
+  bankTarget = clamp(b, -BANK_MAX, BANK_MAX);
+
+  // Thrust: hand size vs your neutral size (learned over the first frames)
+  const size = rawPts.reduce((s, p) => s + Math.hypot(p[9].x - p[0].x, p[9].y - p[0].y), 0) / rawPts.length;
+  if (sizeSamples < CALIB_FRAMES) {
+    sizeBase = (sizeBase * sizeSamples + size) / (sizeSamples + 1);
+    sizeSamples++;
+    thrustTarget = 0;
+  } else {
+    thrustTarget = clamp((size / sizeBase - 1) / THRUST_RANGE, -1, 1);
+  }
+  thrust += (thrustTarget - thrust) * 0.6;               // light de-jitter only
 }
 
 // ============================================================
@@ -669,21 +749,28 @@ function step(now, dt) {
   if (dt > 0) climb += ((altitude - prevAlt) / dt - climb) * clamp(dt * 6, 0, 1);
   prevAlt = altitude;
 
-  // Always flying forward: base speed when hovering, faster with altitude.
-  // During the melt you keep your momentum while the camera dives.
+  // Always flying forward along the heading: base speed, faster with altitude,
+  // times thrust (push forward) or brake (pull back). The melt keeps your momentum.
   if (mode !== "melt") {
-    fwdSpeed += (SPEED_BASE + SPEED_ALT * altitude - fwdSpeed) * clamp(dt * 3, 0, 1);
-    view.x -= bank * DRIFT * dt;          // banking drifts the world sideways
+    const mult = thrust >= 0 ? 1 + THRUST_GAIN * thrust : 1 + BRAKE_GAIN * thrust;
+    const target = Math.max(SPEED_BASE * 0.4, (SPEED_BASE + SPEED_ALT * altitude) * mult);
+    fwdSpeed += (target - fwdSpeed) * (1 - Math.exp(-dt / CAM_TAU));
+    // Banking drifts the world sideways (camera slides along -right = (-hz, +hx))
+    view.x -= bank * DRIFT * dt * view.hz;
+    travel += bank * DRIFT * dt * view.hx;
   }
-  travel += fwdSpeed * dt;
+  view.x += view.hx * fwdSpeed * dt;
+  travel += view.hz * fwdSpeed * dt;
   updateView(now, dt);
+  sunAim = sunAimNow();
 
   if (mode === "live") {
     const visible = hands.length > 0;
     spawnWax(dt);
 
-    // Heat climbs in the sun, cools below it
-    if (visible && altitude >= SUN_LINE) heat = clamp(heat + dt / HEAT_TIME, 0, 1);
+    // Heat builds only when you're up in the sun zone AND aiming at it
+    // (faster the closer to dead centre); otherwise it cools
+    if (visible && altitude >= SUN_LINE && sunAim > 0) heat = clamp(heat + sunAim * dt / HEAT_TIME, 0, 1);
     else heat = clamp(heat - dt / COOL_TIME, 0, 1);
 
     if (!flight && visible && altitude > SEA_LINE) startFlight(now);
@@ -715,10 +802,21 @@ function sunState(now) {
     const u = clamp((now - meltStart) / 1000 / MELT_TIME, 0, 1);
     r = meltSunR * Math.pow(1 - u, 1.6); flare = 1 - u * 0.6;
   }
-  const c = dirCam(0, Math.sin(SUN_ELEV), Math.cos(SUN_ELEV));
-  if (c[2] <= 0.05) return { x: 0, y: 0, r: 0, flare };
+  const c = sunCam();
+  if (c[2] <= 0.05) return { x: 0, y: 0, r: 0, flare };     // behind you
   const [x, y] = toScreen(c);
   return { x, y, r, flare };
+}
+
+// The sun is a fixed direction in the world (world +z, SUN_ELEV up): turn away and it slides off
+function sunCam() { return dirCam(0, Math.sin(SUN_ELEV), Math.cos(SUN_ELEV)); }
+
+// 1 with the sun dead centre, falling to 0 at AIM_CONE off-centre
+function sunAimNow() {
+  const c = sunCam();
+  if (c[2] <= 0) return 0;
+  const off = Math.atan2(Math.hypot(c[0], c[1]), c[2]);
+  return clamp(1 - off / AIM_CONE, 0, 1);
 }
 
 // ---------- Batched wire drawing ----------
@@ -805,42 +903,50 @@ function drawSun(now, s) {
 // ---------- Horizon: the line at infinity, tilted by pitch and roll ----------
 function drawHorizon() {
   if (view.cp <= 0.01) return;
-  const y0 = FOCAL * Math.tan(view.pitch);        // below centre when looking up
+  const y0 = focal * Math.tan(view.pitch);        // below centre when looking up
   const ends = [[-W, y0], [W, y0]].map(([a, b]) => [W / 2 + a * view.cr - b * view.sr, H / 2 + a * view.sr + b * view.cr]);
   wire(ends[0][0], ends[0][1], ends[1][0], ends[1][1], 0.9);
 }
 
-// ---------- Ground grid: scrolls toward you and passes under the bottom edge ----------
-const GRID_SLICES = [0, 0.5, 1.2, 2.5, 4.5, 8, 13, 20, 28, VIEW_FAR];   // long lines, sliced for depth fade
+// ---------- Ground grid: world-aligned, so turning swings it; scrolls under the bottom edge ----------
+// Lines in both world axes over a square centred ahead of you, sliced so each piece
+// fades by its own distance; pieces behind you or past the fade are skipped.
 function drawGround() {
-  const x0 = Math.floor(view.x / GRID) * GRID;
-  for (let i = -GRID_HALF; i <= GRID_HALF; i++) {
-    const x = x0 + i * GRID;
-    for (let s = 1; s < GRID_SLICES.length; s++) {
-      const a = GRID_SLICES[s - 1], b = GRID_SLICES[s];
-      seg3(x, 0, travel + a, x, 0, travel + b, depthB((a + b) / 2, VIEW_FAR));
+  const half = (GRID_LINES * GRID) / 2;
+  const cx = Math.round((view.x + view.hx * (half - 4)) / GRID) * GRID;
+  const cz = Math.round((travel + view.hz * (half - 4)) / GRID) * GRID;
+  const SL = 4;                                     // slice length
+  const piece = (x1, z1, x2, z2) => {
+    const mx = (x1 + x2) / 2, mz = (z1 + z2) / 2;
+    if (fwdOf(mx, mz) < -SL) return;
+    const d = Math.hypot(mx - view.x, mz - travel);
+    if (d > VIEW_FAR) return;
+    seg3(x1, 0, z1, x2, 0, z2, depthB(d, VIEW_FAR) * clamp((VIEW_FAR - d) / 4, 0, 1));
+  };
+  for (let i = 0; i <= GRID_LINES; i++) {
+    const u = -half + i * GRID;
+    for (let s = -half; s < half; s += SL) {
+      piece(cx + u, cz + s, cx + u, cz + s + SL);   // lines along z
+      piece(cx + s, cz + u, cx + s + SL, cz + u);   // lines along x
     }
-  }
-  const zStart = Math.ceil(travel / GRID) * GRID;
-  for (let j = 0; j < GRID_ROWS; j++) {
-    const z = zStart + j * GRID, d = z - travel;
-    seg3(view.x - GRID_HALF * GRID, 0, z, view.x + GRID_HALF * GRID, 0, z,
-         depthB(d, VIEW_FAR) * clamp((VIEW_FAR - d) / 4, 0, 1));
   }
 }
 
 // Fade for scenery at distance d (dim far away, fades in at the far end)
 const sceneryB = d => depthB(d, VIEW_FAR * 1.2) * clamp((VIEW_FAR * 1.2 - d) / 5, 0, 1);
-// Passed behind you or drifted far to the side → respawn far ahead
-const passed = (o, behind, wide) => o.z - travel < behind || Math.abs(o.x - view.x) > wide;
+const distOf = o => Math.hypot(o.x - view.x, o.z - travel);
+// Passed behind you or far off to the side of your heading → respawn far ahead
+const passed = (o, behind, wide) => fwdOf(o.x, o.z) < behind || Math.abs(latOf(o.x, o.z)) > wide;
 
 // ---------- Mountains: jagged ridges at the sides ----------
 function drawMountains() {
   for (const m of mountains) {
     if (passed(m, 0.5, 45)) spawnMountain(m, VIEW_FAR * (0.8 + 0.3 * Math.random()));
-    const b = sceneryB(m.z - travel), P = m.prof;
+    const b = sceneryB(distOf(m)), P = m.prof;
+    const at = i => [m.x + m.ax * P[i][0] * m.w, P[i][1] * m.h, m.z + m.az * P[i][0] * m.w];
     for (let i = 1; i < P.length; i++) {
-      seg3(m.x + P[i - 1][0] * m.w, P[i - 1][1] * m.h, m.z, m.x + P[i][0] * m.w, P[i][1] * m.h, m.z, b);
+      const a = at(i - 1), c = at(i);
+      seg3(a[0], a[1], a[2], c[0], c[1], c[2], b);
     }
   }
 }
@@ -849,7 +955,7 @@ function drawMountains() {
 function drawTowers() {
   for (const t of towers) {
     if (passed(t, -0.5, 30)) spawnTower(t, VIEW_FAR * (0.6 + 0.4 * Math.random()));
-    const b = sceneryB(t.z - travel);
+    const b = sceneryB(distOf(t));
     const ring = (y, w) => [[t.x - w, y, t.z - w], [t.x + w, y, t.z - w], [t.x + w, y, t.z + w], [t.x - w, y, t.z + w]];
     let prev = ring(0, 0.3);
     for (let l = 1; l <= t.levels; l++) {
@@ -870,13 +976,15 @@ function drawTowers() {
 function drawClouds() {
   for (const c of cloudShapes) {
     if (passed(c, 0.3, 30)) spawnCloud(c, VIEW_FAR * (0.7 + 0.3 * Math.random()));
-    const d = c.z - travel, n = c.pts.length, y = view.h + c.yRel;
+    const d = Math.max(0, fwdOf(c.x, c.z)), n = c.pts.length, y = view.h + c.yRel;
     const b = 0.85 * depthB(d, VIEW_FAR) * clamp((VIEW_FAR - d) / 4, 0, 1);
     const split = d < CLOUD_SPLIT ? 3.5 * Math.pow(1 - d / CLOUD_SPLIT, 1.5) : 0;
+    const rx = view.hz, rz = -view.hx;              // faces you: laid out along your right vector
     const half = (from, to, off) => {
       for (let i = from; i < to; i++) {
         const p = c.pts[i % n], q = c.pts[(i + 1) % n];
-        seg3(c.x + p[0] + off, y + p[1], c.z, c.x + q[0] + off, y + q[1], c.z, b);
+        const pu = p[0] + off, qu = q[0] + off;
+        seg3(c.x + rx * pu, y + p[1], c.z + rz * pu, c.x + rx * qu, y + q[1], c.z + rz * qu, b);
       }
     };
     if (split <= 0) half(0, n, 0);
@@ -886,12 +994,13 @@ function drawClouds() {
 
 // ---------- Speed lines: red streaks rushing past once you're flying fast ----------
 function drawSpeedLines() {
-  const show = clamp((fwdSpeed - 6) / 6, 0, 1);
+  const show = clamp((fwdSpeed - 6) / 6 + Math.max(0, thrust), 0, 1);   // surge under thrust
+  const len = fwdSpeed * (0.07 + 0.05 * Math.max(0, thrust));
   for (const p of speedLines) {
     if (passed(p, 0.3, 8)) spawnSpeed(p, 14 + Math.random() * 8);
     if (show <= 0) continue;
-    const t = clamp(1 - (p.z - travel) / 22, 0, 1);
-    seg3(p.x, p.y, p.z, p.x, p.y, p.z + fwdSpeed * 0.07, show * (0.25 + 0.75 * t * t));
+    const t = clamp(1 - fwdOf(p.x, p.z) / 22, 0, 1);
+    seg3(p.x, p.y, p.z, p.x + view.hx * len, p.y, p.z + view.hz * len, show * (0.25 + 0.75 * t * t));
   }
 }
 
@@ -1083,6 +1192,7 @@ $("again").onclick = () => {
   $("results").classList.add("hidden");
   altitude = 0; heat = 0;
   falling = []; wax = []; feathers = []; trailHist = [];
+  sizeSamples = 0; thrust = thrustTarget = 0;   // relearn neutral hand size for thrust
   releaseVoice();                     // drop any leftover melt automation
   lastHandTime = performance.now();
   mode = "live";
