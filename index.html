@@ -12,8 +12,8 @@
     font-family: system-ui, -apple-system, "Segoe UI", Roboto, sans-serif;
     touch-action: manipulation; user-select: none; -webkit-user-select: none;
   }
-  /* Fixed 720x1280 canvas, scaled to fit the screen with letterboxing */
-  canvas { display: block; width: 100vw; height: 100vh; height: 100dvh; object-fit: contain; }
+  /* Canvas fills the screen; its resolution follows the screen's aspect (see fit()) */
+  canvas { display: block; position: fixed; inset: 0; width: 100%; height: 100%; }
 
   .screen {
     position: fixed; inset: 0; display: flex; flex-direction: column;
@@ -89,16 +89,17 @@ const MELT_OCTAVES = 2.5;     // how far the pitch falls during the melt
 const SEA_AFTER_GAIN = 0.08;  // quiet sea tone that returns after the fall
 
 // Canvas
-const W = 720, H = 1280;
+// Long side is always 1280; the short side follows the screen's aspect (fit() sets these)
+let W = 720, H = 1280;
 const SUN_MIN_R = 50;
-const SUN_MAX_R = H * 0.2 / 1.12;     // sphere ≈ 40% of the frame at most (incl. heat warp)
+let SUN_MAX_R = Math.min(W, H) * 0.317;  // sphere ≈ 40% of the short side at most (incl. heat warp)
 
 // First-person flight. World axes: x right, y up (ground at 0), z forward.
 // Red wireframe vectors on black.
 const RED = "rgb(255, 0, 0)";
 const FOCAL = 560;                    // px per world unit at distance 1
 const NEAR = 0.15;                    // near clip plane
-const PITCH_MAX = Math.atan((H / 2 - 60) / FOCAL);   // near the sun the horizon sits at the bottom edge
+let PITCH_MAX = Math.atan((H / 2 - 60) / FOCAL);   // near the sun the horizon sits at the bottom edge
 const CAM_H_SEA = 0.45, CAM_H_TOP = 4.5;             // eye height over the ground
 const SPEED_BASE = 4, SPEED_ALT = 10;                // forward speed when hovering, + extra at the top
 const BANK_MAX = 0.6;                 // radians of camera roll at full phone roll
@@ -183,6 +184,20 @@ const WAX_COLORS = ["rgb(255, 70, 30)", "rgb(255, 105, 40)", "rgb(235, 45, 25)",
 // ============================================================
 const $ = id => document.getElementById(id);
 const canvas = $("canvas"), ctx = canvas.getContext("2d");
+
+// Size the canvas to the screen: long side 1280, short side matching the aspect
+function fit() {
+  const iw = innerWidth || 720, ih = innerHeight || 1280;
+  if (iw >= ih) { W = 1280; H = Math.round(1280 * ih / iw); }
+  else { H = 1280; W = Math.round(1280 * iw / ih); }
+  if (canvas.width !== W) canvas.width = W;
+  if (canvas.height !== H) canvas.height = H;
+  SUN_MAX_R = Math.min(W, H) * 0.317;
+  PITCH_MAX = Math.atan((H / 2 - 60) / FOCAL);
+}
+fit();
+addEventListener("resize", fit);
+if (screen.orientation) screen.orientation.addEventListener("change", fit);
 let audio = null;
 let recStream = null, recorder = null, chunks = [];
 let lastBlob = null;
@@ -820,12 +835,20 @@ async function endFlight(flownMs, fromMelt = false) {
 // ============================================================
 // Gyroscope input (DeviceOrientation)
 // ============================================================
-// beta = front/back tilt, gamma = left/right roll (portrait). "Level" is captured from
-// the first reading after you tap Reach up (or Fly again).
+// beta/gamma are in the device's portrait frame. Turn them into the device "up" vector,
+// rotate it into the screen's frame (so sideways works), and read pitch/roll from that.
+// gyro.beta = pitch, gyro.gamma = roll (degrees). "Level" is captured from the first
+// reading after you tap Reach up (or Fly again).
 function onOrientation(e) {
   if (e.beta == null || e.gamma == null) return;
-  gyro.beta = e.beta; gyro.gamma = e.gamma; gyro.seen = true;
-  if (gyro.calibrate) { gyro.beta0 = e.beta; gyro.gamma0 = e.gamma; gyro.calibrate = false; }
+  const b = e.beta * Math.PI / 180, g = e.gamma * Math.PI / 180;
+  const dx = -Math.cos(b) * Math.sin(g), dy = Math.sin(b), dz = Math.cos(b) * Math.cos(g);
+  const t = (screen.orientation?.angle ?? window.orientation ?? 0) * Math.PI / 180;
+  const ux = dx * Math.cos(t) - dy * Math.sin(t), uy = dx * Math.sin(t) + dy * Math.cos(t), uz = dz;
+  const pitch = Math.atan2(uy, uz) * 180 / Math.PI;
+  const roll = -Math.asin(clamp(ux, -1, 1)) * 180 / Math.PI;
+  gyro.beta = pitch; gyro.gamma = roll; gyro.seen = true;
+  if (gyro.calibrate) { gyro.beta0 = pitch; gyro.gamma0 = roll; gyro.calibrate = false; }
 }
 function recalibrate() { gyro.calibrate = true; }
 
@@ -851,10 +874,10 @@ function shape(deg, range) {
 function readControls() {
   let p = 0, r = 0;
   if (gyro.seen && !gyro.calibrate) {
-    p = PITCH_SIGN * shape(gyro.beta - gyro.beta0, PITCH_RANGE);
-    let dg = gyro.gamma - gyro.gamma0;
-    if (dg > 90) dg -= 180; else if (dg < -90) dg += 180;     // gamma wraps near upright
-    r = shape(dg, ROLL_RANGE);
+    let db = gyro.beta - gyro.beta0;
+    if (db > 180) db -= 360; else if (db < -180) db += 360;   // pitch (atan2) wraps at ±180
+    p = PITCH_SIGN * shape(db, PITCH_RANGE);
+    r = shape(gyro.gamma - gyro.gamma0, ROLL_RANGE);
   }
   if (keys.has("ArrowUp") || keys.has("w")) p = 1;
   if (keys.has("ArrowDown") || keys.has("s")) p = -1;
@@ -1845,6 +1868,12 @@ $("reach").onclick = async () => {
     await audio.ac.resume();
     await motion;
 
+    // Go fullscreen and landscape (both must start inside the tap), then resize to match
+    try { await document.documentElement.requestFullscreen({ navigationUI: "hide" }); } catch (e) { console.warn("Fullscreen failed", e); }
+    try { await screen.orientation.lock("landscape"); } catch (e) { console.warn("Orientation lock failed", e); }
+    await new Promise(res => setTimeout(res, 150));
+    fit();
+
     // One combined stream for every flight's recording
     if (canvas.captureStream) {
       recStream = new MediaStream([
@@ -1866,6 +1895,10 @@ $("reach").onclick = async () => {
 $("save").onclick = saveFlight;
 
 $("again").onclick = () => {
+  if (!document.fullscreenElement) {
+    try { document.documentElement.requestFullscreen({ navigationUI: "hide" }).catch(e => console.warn("Fullscreen failed", e)); }
+    catch (e) { console.warn("Fullscreen failed", e); }
+  }
   $("results").classList.add("hidden");
   altitude = 0; altVel = 0; heat = 0; seaSince = 0;
   wax = []; feathers = []; figures = []; visorDrops = []; frags = []; burnt.clear();
