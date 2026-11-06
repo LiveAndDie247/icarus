@@ -22,17 +22,19 @@
   .hidden { display: none; }
   #results { background: rgba(0, 0, 0, .72); }
 
+  /* One pixel box, red on black */
   button {
-    font: inherit; font-size: 18px; letter-spacing: .12em; text-transform: uppercase;
-    color: #fff; background: transparent; border: 1px solid #e0301e;
-    padding: 16px 38px; border-radius: 40px; min-width: 200px;
-    box-shadow: 0 0 24px rgba(224, 48, 30, .35);
+    font: 700 22px "Courier New", Courier, monospace; letter-spacing: .25em; text-transform: uppercase;
+    color: #f00; background: #000; border: 4px solid #f00; border-radius: 0;
+    padding: 20px 46px; min-width: 240px; cursor: pointer;
+    box-shadow: 0 0 0 4px #000, 0 0 0 6px #f00, 0 0 26px rgba(255, 0, 0, .35);
+    text-shadow: 0 0 8px rgba(255, 0, 0, .7);
+    image-rendering: pixelated;
   }
-  button:active { background: rgba(224, 48, 30, .25); }
+  button:active { background: #f00; color: #000; }
   button:disabled { opacity: .45; }
-  button.blue { border-color: #3d7bff; box-shadow: 0 0 24px rgba(61, 123, 255, .3); }
 
-  #flew { font-size: 64px; font-weight: 200; letter-spacing: .04em; font-variant-numeric: tabular-nums; }
+  #flew { font: 300 64px "Courier New", Courier, monospace; color: #f00; letter-spacing: .06em; font-variant-numeric: tabular-nums; text-shadow: 0 0 12px rgba(255, 0, 0, .6); }
 </style>
 </head>
 <body>
@@ -44,11 +46,10 @@
   <button id="reach">Reach up</button>
 </div>
 
-<!-- After a flight: duration, Save, Fly again. Nothing else. -->
+<!-- After a flight: duration and Fly again. Nothing else. -->
 <div id="results" class="screen hidden">
   <div id="flew">0.0s</div>
-  <button id="save">Save</button>
-  <button id="again" class="blue">Fly again</button>
+  <button id="again">Fly again</button>
 </div>
 
 <script type="module">
@@ -69,11 +70,13 @@ const SEA_END = 3.0;          // seconds back at sea level that end a flight
 
 // Zones (altitude: 0 = the sea, 1 = the top)
 const SEA_LINE = 0.30;        // below this: the sea
-const SUN_LINE = 0.70;        // above this: the sun
+const SUN_LINE = 0.70;        // above this: the sun's reach
 
-// Heat / melt
-const HEAT_TIME   = 4.0;      // seconds in the sun to reach full heat
-const COOL_TIME   = 3.0;      // seconds out of the sun to cool fully
+// Heat / melt: heat is how close you are to the sun. Reach it and you melt.
+const HEAT_FAR  = 170;        // distance where heat starts to build
+const HEAT_NEAR = 58;         // distance of full heat (you've touched it)
+const HEAT_RISE = 1.2;        // seconds for heat to follow proximity when nearing
+const HEAT_FALL = 3.0;        // ...and when backing off
 const MELT_TIME   = 2.0;      // length of the melt sweep (the fall itself is FALL_TIME)
 
 // Pitch
@@ -92,7 +95,8 @@ const SEA_AFTER_GAIN = 0.08;  // quiet sea tone that returns after the fall
 // Long side is always 1280; the short side follows the screen's aspect (fit() sets these)
 let W = 720, H = 1280;
 const SUN_MIN_R = 50;
-let SUN_MAX_R = Math.min(W, H) * 0.317;  // sphere ≈ 40% of the short side at most (incl. heat warp)
+let SUN_MAX_R = Math.max(W, H) * 0.8;    // up close it fills the screen
+let SUN_FACE_R = Math.min(W, H) * 0.317; // the size at which its face is fully resolved
 
 // First-person flight. World axes: x right, y up (ground at 0), z forward.
 // Red wireframe vectors on black.
@@ -100,7 +104,7 @@ const RED = "rgb(255, 0, 0)";
 const FOCAL = 560;                    // px per world unit at distance 1
 const NEAR = 0.15;                    // near clip plane
 let PITCH_MAX = Math.atan((H / 2 - 60) / FOCAL);   // near the sun the horizon sits at the bottom edge
-const CAM_H_SEA = 0.45, CAM_H_TOP = 4.5;             // eye height over the ground
+const CAM_H_SEA = 0.45, CAM_H_TOP = 64;              // eye height over the ground: the world shrinks far below
 const SPEED_BASE = 4, SPEED_ALT = 10;                // forward speed when hovering, + extra at the top
 const BANK_MAX = 0.6;                 // radians of camera roll at full phone roll
 const DRIFT = 7;                      // sideways world units / s per radian of bank
@@ -110,14 +114,15 @@ const FOV_WIDEN = 0.35;               // field of view widens in a dive (focal /
 const CAM_TAU = 0.1;                  // camera easing time constant, seconds
 // THE SUN: a fixed place in the world, far ahead and high. You fly toward it; it grows as you near it.
 // Every flight starts at the origin, facing it (world +z).
-const SUN_X = 0, SUN_Y = 90, SUN_Z = 300;
-const SUN_WORLD_R = 45;               // its radius in world units (sets how big it looks at a distance)
-const AIM_CONE = 14 * Math.PI / 180;  // heat only builds with the sun within this angle of centre
+const SUN_X = 0, SUN_Y = 56, SUN_Z = 280;
+const SUN_WORLD_R = 42;               // its radius in world units (sets how big it looks at a distance)
+const AIM_CONE = 30 * Math.PI / 180;  // how centred the sun is (drives the shimmer and the glitch)
+const CORONA_N = 48;                  // flame tongues round the limb
 const GRID = 2, GRID_LINES = 28;      // ground grid spacing, lines per axis
 const VIEW_FAR = 56;                  // depth-fade distance
 const MOUNTAIN_N = 14, TOWER_N = 8, CLOUD_N = 6, SPEED_N = 50;
 const COLUMN_N = 5, MAZE_N = 5, RING_N = 6, BIGF_N = 3;   // ruins, labyrinth walls, rings in the air, giant feathers
-const RIDGE_D = 50, RIDGE_N = 56;     // far skyline: distance, segments across the view
+const RIDGE_D = 50, RIDGE_N = 96;     // far skyline: distance, segments all the way round
 const COLOSSUS_SCALE = 9;             // one giant figure standing far off
 
 // Barrel rolls: a hard sideways flick of the phone (or a double-tap on one half of the screen; Q/E on a keyboard)
@@ -128,6 +133,12 @@ const BARREL_FLICK_RATE = 4.5;        // ...this fast (input units per second)
 const BARREL_FLICK_FROM = 0.45;       // ...having been below this a moment earlier
 const BARREL_COOL = 0.35;             // seconds before another can start
 const DOUBLE_TAP = 320;               // ms
+
+// Loops: swipe up, a hard flick of the phone's top edge toward you, or L on a keyboard
+const LOOP_TIME = 2.4;                // seconds for the full vertical circle
+const LOOP_R = 2.6;                   // radius of the loop in world units
+const SWIPE_MIN = 70;                 // px upward within SWIPE_MS to count as a swipe
+const SWIPE_MS = 450;
 const CLOUD_SPLIT = 5;                // clouds start parting this far ahead
 const WIRE_LEVELS = 8;                // brightness buckets for batched line drawing
 
@@ -156,9 +167,9 @@ const FALL_TEXT_AT = FALL_TIME - 1.6; // "he also flew." appears
 const SEA_SPACING = 4, SEA_LINES = 31, SEA_HALF = 60;
 
 // The sun's face and its lies
-const FACE_FROM = 0.75;               // sun size (of max) where the face starts to resolve
-const LIE_HEAT = 0.75;                // anomalies only above this heat
-const LIE_EVERY = 4;                  // average seconds between them
+const FACE_FROM = 0.35;               // sun size (of SUN_FACE_R) where the face starts to resolve
+const LIE_HEAT = 0.45;                // anomalies only above this heat
+const LIE_EVERY = 4;                  // average seconds between them at LIE_HEAT; faster as heat rises
 
 // Two voices
 const DRONE_FLAT = 18;                // cents: the father's drone sits flat...
@@ -171,7 +182,7 @@ const VISOR_FROM = 0.15;              // heat where drops start landing
 const VISOR_RATE = 3;                 // drops / s at full heat
 
 // The renderer fails at high heat
-const GLITCH_FROM = 0.55;             // heat where it starts; worst at full heat
+const GLITCH_FROM = 0.4;              // heat where it starts; worst at full heat
 const GREEK = "αβγδεζηθικλμνξοπρστυφχψωΓΔΘΛΞΠΣΦΨΩ";
 
 // Greek rain, behind everything
@@ -186,8 +197,12 @@ const HAND_PITCH = 0.6;               // fingers tipped forward, away from you (
 const HAND_INWARD = 0.25;             // tilted in toward the centre (radians about z)
 const BONE = "rgb(255, 215, 200)";    // white-red bones
 const CHAR = "rgb(255, 120, 40)";     // flesh about to burn
-const BURN_TIP = 0.15, BURN_WRIST = 0.95;            // heat where fingertips / wrist flesh burns away
+const BURN_TIP = 0.15, BURN_WRIST = 0.95;            // burn amount where fingertips / wrist flesh burns away
+const BURN_LIVE = 0.3;                // how far the sun's heat alone chars them (the rest burns in the fall)
+const BURN_FALL_END = 0.72;           // fraction of the fall by which the hands are bone
 const FRAG_CAP = 160;                 // burnt flesh fragments in the air
+const EMBER_CAP = 220;                // sparks rising off the burning edge
+const HAND_GLOW = "rgba(255, 40, 20, 0.14)";
 const COVER_IN = 0.8;                 // melt: seconds for the hands to rise over the camera
 const COVER_OUT_AT = FALL_TIME - 1.2, COVER_OUT = 0.6;   // ...and when / how fast they drop away
 const FEATHER_CAP = 50;
@@ -207,15 +222,14 @@ function fit() {
   else { H = 1280; W = Math.round(1280 * iw / ih); }
   if (canvas.width !== W) canvas.width = W;
   if (canvas.height !== H) canvas.height = H;
-  SUN_MAX_R = Math.min(W, H) * 0.317;
+  SUN_MAX_R = Math.max(W, H) * 0.8;
+  SUN_FACE_R = Math.min(W, H) * 0.317;
   PITCH_MAX = Math.atan((H / 2 - 60) / FOCAL);
 }
 fit();
 addEventListener("resize", fit);
 if (screen.orientation) screen.orientation.addEventListener("change", fit);
 let audio = null;
-let recStream = null, recorder = null, chunks = [];
-let lastBlob = null;
 
 let mode = "intro";           // intro | live | melt | results
 let altitude = 0;             // 0..1, a physics value driven by the phone's pitch
@@ -240,14 +254,18 @@ let travel = 0;                       // the camera's world z
 const camOff = { x: 0, y: 0, z: 0 };  // temporary camera displacement (the barrel roll's helix)
 let barrel = null;                    // { start, dir }: a barrel roll in progress (dir +1 right, −1 left)
 let barrelCool = 0;                   // seconds until another may start
-const rollHist = [];                  // recent [time, rollIn] pairs, for flick detection
+const rollHist = [], pitchHist = [];  // recent [time, input] pairs, for flick detection
 let lastTap = { t: -1e9, x: 0 };      // for double-tap barrel rolls
+let swipe = null;                     // { t, y } pointer-down, for swipe-up loops
+let vloop = null;                     // { start }: a loop in progress
+let burnAmt = 0;                      // 0..1+: how far the hands have burnt (tips first, wrist last)
+let embers = [];                      // sparks off the burning edge: { x, y, vx, vy, life, max }
 let fwdSpeed = SPEED_BASE;            // world units / s, always forward
 let bank = 0, bankTarget = 0;         // camera roll from the phone's roll
 let yawRate = 0, yawTarget = 0;       // turn rate from the phone's roll
 let thrustEff = 0;                    // 0..1: how hard you're diving (drives speed, FOV, speed lines, engine)
 let sunAim = 0;                      // 1 = sun dead centre, 0 = outside the aim cone
-let meltAlt0 = 0, meltPitch0 = 0, meltH0 = CAM_H_SEA;
+let meltAlt0 = 0, meltPitch0 = 0, meltH0 = CAM_H_SEA, meltBurn0 = 0;
 let meltX0 = 0, meltZ0 = 0, meltYaw0 = 0, meltHx = 0, meltHz = 1;   // where the fall began
 
 let figures = [];                     // the ones before you
@@ -408,6 +426,7 @@ function spawnColossus(c, ahead) {
 // Respawn an object that left the view: far ahead if it passed behind you, anywhere ahead if a
 // turn swept it off to the side (so the scene refills instead of leaving a gap after a turn)
 function respawn(o, fn, behind, wide) {
+  if (vloop) return;                                   // mid-loop you look backward: keep the world where it is
   const f = fwdOf(o.x, o.z);
   if (f < behind) fn(o, VIEW_FAR * (0.8 + 0.3 * Math.random()));
   else if (Math.abs(latOf(o.x, o.z)) > wide) fn(o, 8 + Math.random() * (VIEW_FAR - 8));
@@ -479,8 +498,12 @@ function updateView(now, dt) {
     viewAlt = altitude;
     const sky = clamp((viewAlt - SEA_LINE) / (1 - SEA_LINE), 0, 1);
     const ease = sky * sky * (3 - 2 * sky);
-    view.pitch += (PITCH_MAX * ease + CAM_PITCH_TILT * pitchIn - view.pitch) * k;   // + nose follows the phone
-    view.h += (lerp(CAM_H_SEA, CAM_H_TOP, Math.pow(sky, 1.2)) - view.h) * k;
+    // The nose turns toward the sun as you rise, as far as you're heading its way; level when you look away
+    const dxs = SUN_X - view.x, dzs = SUN_Z - travel, hd = Math.hypot(dxs, dzs);
+    const facing = clamp((dxs * view.hx + dzs * view.hz) / Math.max(hd, 1e-3), 0, 1);
+    const elev = clamp(Math.atan2(SUN_Y - view.h, hd), -0.55, PITCH_MAX);
+    view.pitch += (elev * ease * facing + CAM_PITCH_TILT * pitchIn - view.pitch) * k;   // + nose follows the phone
+    view.h += (lerp(CAM_H_SEA, CAM_H_TOP, Math.pow(sky, 1.35)) - view.h) * k;
     bank += (bankTarget - bank) * k;
     yawRate += (yawTarget - yawRate) * k;
     focal += (FOCAL / (1 + FOV_WIDEN * thrustEff) - focal) * k;   // wider view in a dive
@@ -503,23 +526,42 @@ function updateView(now, dt) {
     camOff.x = view.hz * lat; camOff.z = -view.hx * lat; camOff.y = up;
     if (u >= 1) { barrel = null; barrelCool = BARREL_COOL; }
   }
+  // Loop: a full vertical circle in the heading plane; upside-down over the top
+  let lPitch = 0;
+  if (vloop) {
+    const u = clamp((now - vloop.start) / 1000 / LOOP_TIME, 0, 1);
+    const th = Math.PI * 2 * (u < 0.5 ? 2 * u * u : 1 - 2 * (1 - u) * (1 - u));   // eased in and out
+    lPitch = th;
+    const fwd = LOOP_R * Math.sin(th), up = LOOP_R * (1 - Math.cos(th));
+    camOff.x += view.hx * fwd; camOff.z += view.hz * fwd; camOff.y += up;
+    if (u >= 1) { vloop = null; barrelCool = BARREL_COOL; }
+  }
   view.roll = bank + tiltNow(now) + bRoll;    // the horizon sometimes tilts on its own (renderer failing)
-  view.cp = Math.cos(view.pitch); view.sp = Math.sin(view.pitch);
+  const pitch = view.pitch + lPitch;
+  view.cp = Math.cos(pitch); view.sp = Math.sin(pitch);
   view.cr = Math.cos(view.roll);  view.sr = Math.sin(view.roll);
 }
 
+// Start a loop
+function triggerLoop(now = performance.now()) {
+  if (mode !== "live" || barrel || vloop || barrelCool > 0) return;
+  vloop = { start: now };
+  barrelWhoosh(LOOP_TIME);
+}
+function loopNow() { return vloop ? 1 : 0; }
+
 // Start a barrel roll (dir +1 = to the right)
 function triggerBarrel(dir, now = performance.now()) {
-  if (mode !== "live" || barrel || barrelCool > 0) return;
+  if (mode !== "live" || barrel || vloop || barrelCool > 0) return;
   barrel = { start: now, dir };
-  barrelWhoosh();
+  barrelWhoosh(BARREL_TIME);
 }
 function barrelNow() { return barrel ? 1 : 0; }
 
 // The whoosh: a burst of wind sweeping up and back down
-function barrelWhoosh() {
+function barrelWhoosh(T) {
   if (!audio) return;
-  const a = audio, t = a.ac.currentTime, T = BARREL_TIME;
+  const a = audio, t = a.ac.currentTime;
   hold(a.windGain.gain, t); hold(a.windFilter.frequency, t);
   a.windGain.gain.linearRampToValueAtTime(0.16, t + T * 0.35);
   a.windGain.gain.linearRampToValueAtTime(0.0001, t + T);
@@ -607,10 +649,13 @@ function initAudio() {
     wind: ac.createBufferSource(), windFilter: ac.createBiquadFilter(), windGain: ac.createGain(),
     // THE FATHER: a low drone one and two octaves below, tuned flat (strongest at sea)
     drone1: ac.createOscillator(), drone2: ac.createOscillator(), droneG2: ac.createGain(), droneGain: ac.createGain(),
-    // THE SUN: a shimmering high harmonic, two beating sines with a tremolo (strongest near the sun)
+    // THE SUN: two beating sines with a tremolo; harmonic from afar, inharmonic and screaming up close
     sunV1: ac.createOscillator(), sunV2: ac.createOscillator(), sunGain: ac.createGain(),
     sunTrem: ac.createOscillator(), sunTremDepth: ac.createGain(),
-    recDest: ac.createMediaStreamDestination(),
+    // Its anger: a roar of filtered noise and a sub-bass rumble, both rising with nearness
+    roar: ac.createBufferSource(), roarFilter: ac.createBiquadFilter(), roarGain: ac.createGain(),
+    roarLfo: ac.createOscillator(), roarLfoDepth: ac.createGain(),
+    rumble: ac.createOscillator(), rumble2: ac.createOscillator(), rumbleGain: ac.createGain(),
   };
   const n = node;
 
@@ -682,9 +727,24 @@ function initAudio() {
   n.sunTrem.connect(n.sunTremDepth).connect(n.sunGain.gain);
   n.sunGain.connect(n.amp);
 
+  // The roar: the same noise through a wandering bandpass, straight to the master and the hall
+  n.roar.buffer = noise; n.roar.loop = true;
+  n.roarFilter.type = "bandpass"; n.roarFilter.frequency.value = 220; n.roarFilter.Q.value = 0.6;
+  n.roarGain.gain.value = 0;
+  n.roarLfo.frequency.value = 0.9; n.roarLfoDepth.gain.value = 0;
+  n.roarLfo.connect(n.roarLfoDepth).connect(n.roarFilter.frequency);
+  n.roar.connect(n.roarFilter).connect(n.roarGain);
+  n.roarGain.connect(n.master); n.roarGain.connect(n.hall);
+  n.roar.start();
+  // The rumble: two sub sines a few Hz apart, beating slowly
+  n.rumble.type = n.rumble2.type = "sine";
+  n.rumble.frequency.value = 31; n.rumble2.frequency.value = 34.5;
+  n.rumbleGain.gain.value = 0;
+  n.rumble.connect(n.rumbleGain); n.rumble2.connect(n.rumbleGain);
+  n.rumbleGain.connect(n.master);
+
   n.master.connect(n.comp);
   n.comp.connect(ac.destination);
-  n.comp.connect(n.recDest);
 
   // Modulation routing (cents added to every oscillator's detune)
   n.wobble.connect(n.wobblePitch).connect(n.pitchBus);
@@ -693,7 +753,7 @@ function initAudio() {
   for (const o of [n.osc1, n.osc2, n.sub, n.shim, n.drone1, n.drone2, n.sunV1, n.sunV2]) n.pitchBus.connect(o.detune);
 
   for (const o of [n.osc1, n.osc2, n.sub, n.shim, n.wobble, n.vib, n.engine,
-                   n.drone1, n.drone2, n.sunV1, n.sunV2, n.sunTrem]) o.start();
+                   n.drone1, n.drone2, n.sunV1, n.sunV2, n.sunTrem, n.roarLfo, n.rumble, n.rumble2]) o.start();
   setFreq(n, ac, ROOT_HZ, 0.01);
   return { ac, ...n };
 }
@@ -727,6 +787,7 @@ const voiceParams = a => [
   a.windGain.gain, a.windFilter.frequency,
   a.drone1.frequency, a.drone2.frequency, a.droneGain.gain,
   a.sunV1.frequency, a.sunV2.frequency, a.sunGain.gain, a.sunTremDepth.gain,
+  a.roarGain.gain, a.roarFilter.frequency, a.roarLfoDepth.gain, a.rumbleGain.gain,
 ];
 // Before live control resumes (e.g. "Fly again"), clear any melt automation
 function releaseVoice() {
@@ -735,8 +796,26 @@ function releaseVoice() {
   for (const p of voiceParams(audio)) hold(p, t);
 }
 
+// The signal fails near the sun: dropouts, and the pitch jumping an octave or two for an instant
+function sunGlitchAudio(h) {
+  const a = audio, t = a.ac.currentTime;
+  if (Math.random() < 0.55) {                               // dropout
+    const g = a.amp.gain.value, d = 0.03 + Math.random() * 0.09 * h;
+    a.amp.gain.setValueAtTime(0.0001, t); a.amp.gain.setValueAtTime(g, t + d);
+  } else {                                                  // pitch jump
+    const jump = (Math.random() < 0.5 ? -1 : 1) * (1200 + 1200 * Math.round(Math.random() * h));
+    const d = 0.04 + Math.random() * 0.1;
+    for (const o of [a.osc1, a.osc2, a.sub]) {
+      const v = o.detune.value;
+      o.detune.setValueAtTime(v + jump, t); o.detune.setValueAtTime(v, t + d);
+    }
+  }
+}
+
 // Map altitude + heat to the voice, every frame
-function updateVoice(handsVisible) {
+let dtVoice = 1 / 60;
+function updateVoice(handsVisible, dt = 1 / 60) {
+  dtVoice = dt;
   const a = audio;
   let semis, cutoff, q, saw, sub, shim, rev, hall, wobP, wobF, spread, vib;
 
@@ -745,22 +824,24 @@ function updateVoice(handsVisible) {
     semis = 0; cutoff = 260; q = 1.2; saw = 0.25; sub = 0.5; shim = 0;
     rev = 0.4; hall = 0; wobP = 14; wobF = 140; spread = 4; vib = 0;
   } else {
-    // SKY → SUN: pitch climbs with altitude. The sky stays pure (triangle + sine,
-    // low lowpass, no saw); the sun opens the filter and brings in the saw.
-    semis = softSnap(RANGE_SEMIS * (altitude - SEA_LINE) / (1 - SEA_LINE));
+    // SKY: pitch climbs with altitude, pure (triangle + sine, low lowpass, no saw).
+    // NEAR THE SUN: the melody sinks back into the root and the voice comes apart:
+    // the two oscillators drift a quarter-tone apart, the filter turns resonant and
+    // screeching, the vibrato slows to a wide seasick wobble, the hall opens.
+    const h = heat;
+    const melody = softSnap(RANGE_SEMIS * (altitude - SEA_LINE) / (1 - SEA_LINE));
+    semis = lerp(melody, -5, Math.pow(h, 1.3));            // sinks below the root as you close in
     const sky = clamp((altitude - SEA_LINE) / (SUN_LINE - SEA_LINE), 0, 1);
-    const sun = clamp((altitude - SUN_LINE) / (1 - SUN_LINE), 0, 1);
-    const inSun = altitude >= SUN_LINE;
-    cutoff = inSun ? lerp(2200, 4500, sun) + heat * 6000 : lerp(700, 1500, sky);
-    q = inSun ? 0.7 : 0.5;
-    saw = inSun ? 0.1 + sun * 0.1 + heat * 0.3 : 0;
-    sub = inSun ? 0.2 : 0.28;
-    shim = inSun ? 0.03 + heat * 0.14 : 0;
-    rev = 0.22 + heat * 0.3;               // short room, a little wetter with heat
-    hall = Math.pow(heat, 1.5) * 0.9;      // long hall opens as heat rises
-    wobP = 0; wobF = 0;
-    spread = inSun ? 3 + heat * 24 : 0;    // detune widens with heat
-    vib = heat * heat * 38;                // pitch wobble grows near the melt
+    cutoff = lerp(lerp(700, 1500, sky), 5200, h * h);
+    q = lerp(0.5, 7, h * h);                                // resonance rises: a whistle on the edge
+    saw = h * 0.45;
+    sub = lerp(0.28, 0.55, h);
+    shim = h * h * 0.12;
+    rev = 0.22 + h * 0.2;
+    hall = Math.pow(h, 1.3) * 1.0;                          // long hall opens as you near it
+    wobP = h * h * 30; wobF = h * 300;                      // the slow underwater wobble returns, bigger
+    spread = 3 + h * 70;                                    // detune: a beating cluster
+    vib = h * h * 140;                                      // wide...
   }
   // Loudness rises ~6 dB with heat: the moment before the melt is the loudest
   const level = BASE_GAIN * Math.pow(10, (HEAT_DB * heat) / 20);
@@ -768,13 +849,26 @@ function updateVoice(handsVisible) {
   // The father: strongest at sea, fading as you climb; he pulls the main tone slightly flat
   const fatherAmt = lerp(1, 0.15, clamp((altitude - SEA_LINE) / (1 - SEA_LINE), 0, 1));
   const pull = FATHER_PULL * fatherAmt;
-  // The sun: strongest high up and aimed at it
-  const sunNear = clamp((altitude - 0.5) / 0.5, 0, 1) * (0.35 + 0.65 * sunAim);
+  // The sun: from afar a faint harmonic shimmer when you face it; near, an inharmonic scream,
+  // a roar of noise and a rumble underneath, and the signal itself starts to fail
+  const sunNear = clamp(heat * (0.5 + 0.5 * sunAim), 0, 1);
   glide(a.droneGain.gain, 0.35 * fatherAmt, 0.2);
-  glide(a.sunGain.gain, 0.07 * sunNear, 0.15);
-  glide(a.sunTremDepth.gain, 0.035 * sunNear, 0.15);
+  glide(a.drone2.detune, -DRONE_FLAT - heat * 95, 0.3);   // the father's low voice slides a semitone flat
+  glide(a.sunGain.gain, 0.05 * sunNear + 0.12 * heat * heat, 0.15);
+  glide(a.sunTremDepth.gain, 0.03 * sunNear + 0.08 * heat * heat, 0.15);
+  glide(a.sunTrem.frequency, lerp(6.5, 17, heat), 0.3);
+  glide(a.roarGain.gain, 0.3 * heat * heat * heat, 0.25);
+  glide(a.roarFilter.frequency, lerp(180, 1100, heat), 0.3);
+  glide(a.roarLfoDepth.gain, 400 * heat, 0.3);
+  glide(a.roarLfo.frequency, lerp(0.6, 4, heat), 0.3);
+  glide(a.rumbleGain.gain, 0.5 * heat * heat, 0.3);
+  if (heat > 0.5 && Math.random() < (heat - 0.5) * 2.2 * dtVoice) sunGlitchAudio(heat);
 
   setFreq(a, a.ac, hzOf(semis), 0.06);
+  const ratio = lerp(3, 5.04, heat);                        // the sun's voice goes inharmonic
+  glide(a.sunV1.frequency, hzOf(semis) * ratio, 0.06);
+  glide(a.sunV2.frequency, hzOf(semis) * ratio * lerp(SUN_BEAT, 1.41, heat), 0.06);
+  glide(a.vib.frequency, lerp(5.5, 0.8, heat), 0.3);
   glide(a.osc1.detune, spread - pull);
   glide(a.osc2.detune, -spread - pull);
   glide(a.shim.detune, spread * 0.5 - pull);
@@ -788,7 +882,6 @@ function updateVoice(handsVisible) {
   glide(a.wobblePitch.gain, wobP, 0.4);
   glide(a.wobbleFilter.gain, wobF, 0.4);
   glide(a.vibDepth.gain, vib, 0.15);
-  glide(a.vib.frequency, 5.5 + heat * 2, 0.3);
   glide(a.wet.gain, heat * 0.6, 0.15);     // soft saturation creeps in
   glide(a.dry.gain, 1 - heat * 0.3, 0.15);
   glide(a.amp.gain, handsVisible ? level : 0, handsVisible ? 0.08 : 0.25);
@@ -820,6 +913,8 @@ function meltVoice() {
   a.sunV2.frequency.exponentialRampToValueAtTime(end * 3 * SUN_BEAT, t + T);
   a.sunGain.gain.linearRampToValueAtTime(0, t + T * 0.4);            // the sun lets go first
   a.sunTremDepth.gain.linearRampToValueAtTime(0, t + T * 0.4);
+  a.roarGain.gain.linearRampToValueAtTime(0, t + T * 0.6);           // its roar fades behind you
+  a.rumbleGain.gain.linearRampToValueAtTime(0, t + T * 1.5);
 
   // Volume collapse: -12 dB at 1s, ~-30 dB at 1.7s, near silence at 2s
   a.amp.gain.exponentialRampToValueAtTime(g0 * 0.25, t + T * 0.5);
@@ -861,6 +956,7 @@ function seaReturn() {
   a.sunV2.frequency.setValueAtTime(ROOT_HZ * 3 * SUN_BEAT, ts);
   a.droneGain.gain.setValueAtTime(0.35, ts);        // at sea, the father is strongest
   a.sunGain.gain.setValueAtTime(0, ts);
+  a.roarGain.gain.setValueAtTime(0, ts); a.rumbleGain.gain.setValueAtTime(0, ts);
   a.osc1.detune.setValueAtTime(4 - FATHER_PULL, ts);
   a.osc2.detune.setValueAtTime(-4 - FATHER_PULL, ts);
   a.shim.detune.setValueAtTime(2 - FATHER_PULL, ts);
@@ -907,54 +1003,12 @@ function whisper() {
 }
 
 // ============================================================
-// Recording: canvas video + the audio output in one webm
-// ============================================================
-function pickMime() {
-  const types = ["video/webm;codecs=vp9,opus", "video/webm;codecs=vp8,opus", "video/webm"];
-  return types.find(t => window.MediaRecorder?.isTypeSupported?.(t)) ?? "";
-}
-
-function startRecording() {
-  if (!window.MediaRecorder || !recStream) return;
-  chunks = []; lastBlob = null;
-  const mimeType = pickMime();
-  try {
-    recorder = new MediaRecorder(recStream, mimeType ? { mimeType, videoBitsPerSecond: 2_500_000 } : {});
-  } catch (e) { console.warn("MediaRecorder failed", e); recorder = null; return; }
-  recorder.ondataavailable = e => { if (e.data.size) chunks.push(e.data); };
-  recorder.start(1000);
-}
-
-function stopRecording() {
-  return new Promise(resolve => {
-    if (!recorder || recorder.state === "inactive") return resolve(null);
-    recorder.onstop = () => resolve(chunks.length ? new Blob(chunks, { type: recorder.mimeType || "video/webm" }) : null);
-    recorder.stop();
-  });
-}
-
-async function saveFlight() {
-  if (!lastBlob) return;
-  const secs = $("flew").textContent.replace(/[^\d.]/g, "");
-  const file = new File([lastBlob], `icarus-${secs}s.webm`, { type: lastBlob.type });
-  if (navigator.canShare?.({ files: [file] })) {
-    try { await navigator.share({ files: [file], title: "Icarus" }); return; }
-    catch (e) { if (e.name === "AbortError") return; console.warn("Share failed, downloading", e); }
-  }
-  const url = URL.createObjectURL(file);
-  const link = Object.assign(document.createElement("a"), { href: url, download: file.name });
-  document.body.appendChild(link); link.click(); link.remove();
-  setTimeout(() => URL.revokeObjectURL(url), 10_000);
-}
-
-// ============================================================
 // Flight lifecycle
 // ============================================================
 function startFlight(now) {
   flight = { start: now };
   flightOrigin = { x: view.x, z: travel, hx: view.hx, hz: view.hz };
   ghostPath = []; lastGhostRec = 0;
-  startRecording();
 }
 
 function startMelt(now) {
@@ -962,7 +1016,8 @@ function startMelt(now) {
   meltStart = now;
   flight.flown = now - flight.start;
   meltSunR = sunRadius();
-  meltAlt0 = altitude; meltPitch0 = view.pitch; meltH0 = view.h;
+  meltAlt0 = altitude; meltPitch0 = view.pitch; meltH0 = view.h; meltBurn0 = burnAmt;
+  barrel = null; vloop = null;
   meltX0 = view.x; meltZ0 = travel; meltYaw0 = view.yaw; meltHx = view.hx; meltHz = view.hz;
   lie = null; lieTextUntil = 0;       // all text goes silent
   tilt = null; stutterLeft = 0; fallWhispered = false;
@@ -977,13 +1032,9 @@ async function endFlight(flownMs, fromMelt = false) {
   saveGhost(ghostPath);
   ghostPath = [];
   flight = null; flightOrigin = null;
-  heat = 0;
+  heat = 0; burnAmt = 0;
   $("flew").textContent = (flownMs / 1000).toFixed(1) + "s";
-  $("save").disabled = true;
-  $("save").classList.toggle("hidden", !window.MediaRecorder);
   $("results").classList.remove("hidden");
-  lastBlob = await stopRecording();
-  $("save").disabled = !lastBlob;
 }
 
 // ============================================================
@@ -1037,7 +1088,8 @@ function readControls(now, dt) {
   if (keys.has("ArrowDown") || keys.has("s")) p = -1;
   if (keys.has("ArrowLeft") || keys.has("a")) r = -1;
   if (keys.has("ArrowRight") || keys.has("d")) r = 1;
-  detectFlick(now, dt, r);
+  if (detectFlick(rollHist, now, dt, r)) triggerBarrel(Math.sign(r), now);
+  if (detectFlick(pitchHist, now, dt, p) && p > 0) triggerLoop(now);   // top edge flicked toward you
   pitchIn = p; rollIn = r;
   yawTarget = rollIn * YAW_RATE;                 // roll right → turn right
   bankTarget = -rollIn * BANK_MAX;               // (bank > 0 = banked left)
@@ -1047,32 +1099,39 @@ function readControls(now, dt) {
 
 // A hard, fast flick of the phone sideways: the roll input shoots past BARREL_FLICK,
 // quickly, having been near level a moment before → barrel roll that way
-function detectFlick(now, dt, r) {
-  rollHist.push([now, r]);
-  while (rollHist.length && rollHist[0][0] < now - 400) rollHist.shift();
-  const prev = rollHist.length > 1 ? rollHist[rollHist.length - 2][1] : r;
+function detectFlick(hist, now, dt, r) {
+  hist.push([now, r]);
+  while (hist.length && hist[0][0] < now - 400) hist.shift();
+  const prev = hist.length > 1 ? hist[hist.length - 2][1] : r;
   const rate = (r - prev) / Math.max(dt, 1e-3);
-  if (Math.abs(r) < BARREL_FLICK || Math.sign(rate) !== Math.sign(r) || Math.abs(rate) < BARREL_FLICK_RATE) return;
-  const earlier = rollHist.filter(([t]) => t < now - 180 && t > now - 400);
-  if (!earlier.length || earlier.some(([, v]) => Math.abs(v) > BARREL_FLICK_FROM)) return;
-  triggerBarrel(Math.sign(r), now);
-  rollHist.length = 0;
+  if (Math.abs(r) < BARREL_FLICK || Math.sign(rate) !== Math.sign(r) || Math.abs(rate) < BARREL_FLICK_RATE) return false;
+  const earlier = hist.filter(([t]) => t < now - 180 && t > now - 400);
+  if (!earlier.length || earlier.some(([, v]) => Math.abs(v) > BARREL_FLICK_FROM)) return false;
+  hist.length = 0;
+  return true;
 }
 
 addEventListener("keydown", e => {
   keys.add(e.key.length === 1 ? e.key.toLowerCase() : e.key);
   if (e.key === "q") triggerBarrel(-1);
   if (e.key === "e") triggerBarrel(1);
+  if (e.key === "l") triggerLoop();
   if (e.key === " ") { e.preventDefault(); triggerBarrel(rollIn < 0 ? -1 : 1); }
 });
 addEventListener("keyup", e => keys.delete(e.key.length === 1 ? e.key.toLowerCase() : e.key));
-// Double-tap one half of the screen: barrel roll toward that side
+// Double-tap one half of the screen: barrel roll toward that side. Swipe up: loop.
 canvas.addEventListener("pointerdown", e => {
   const now = performance.now();
+  swipe = { t: now, y: e.clientY };
   if (now - lastTap.t < DOUBLE_TAP && Math.abs(e.clientX - lastTap.x) < 80) {
     triggerBarrel(e.clientX < innerWidth / 2 ? -1 : 1, now);
     lastTap.t = -1e9;
   } else lastTap = { t: now, x: e.clientX };
+});
+canvas.addEventListener("pointerup", e => {
+  const now = performance.now();
+  if (swipe && now - swipe.t < SWIPE_MS && swipe.y - e.clientY > SWIPE_MIN) { triggerLoop(now); lastTap.t = -1e9; }
+  swipe = null;
 });
 
 // Altitude physics: climb rate follows the tilt (with a little lag); gravity sinks you slowly
@@ -1110,6 +1169,7 @@ function step(now, dt) {
 
   updateRain(dt);
   updateFrags(dt);
+  updateEmbers(dt);
 
   if (mode === "live") {
     spawnWax(dt);
@@ -1118,14 +1178,16 @@ function step(now, dt) {
     recordGhost(now);
     updateLie(now, dt);
 
-    // Heat builds only when you're up in the sun zone AND aiming at it
-    // (faster the closer to dead centre); otherwise it cools
-    if (altitude >= SUN_LINE && sunAim > 0) heat = clamp(heat + sunAim * dt / HEAT_TIME, 0, 1);
-    else heat = clamp(heat - dt / COOL_TIME, 0, 1);
+    // Heat is nearness: it builds as you close on the sun and fades as you back off.
+    // Touch it (full heat) and you melt.
+    const near = Math.pow(clamp((HEAT_FAR - sunDist()) / (HEAT_FAR - HEAT_NEAR), 0, 1), 1.4);
+    heat += (near - heat) * (1 - Math.exp(-dt / (near > heat ? HEAT_RISE : HEAT_FALL)));
+    if (near >= 1) heat = 1;
+    burnAmt = heat * BURN_LIVE;
 
     if (!flight && altitude > SEA_LINE) { startFlight(now); seaSince = 0; }
 
-    if (flight && heat >= 1) { startMelt(now); return; }
+    if (flight && heat >= 0.995) { startMelt(now); return; }
     // Sank back into the sea and stayed there: the flight is over
     if (flight) {
       if (altitude <= 0.001) {
@@ -1134,8 +1196,12 @@ function step(now, dt) {
       } else seaSince = 0;
     }
 
-    updateVoice(true);
+    updateVoice(true, dt);
   } else if (mode === "melt") {
+    // The hands burn through on the way down: tips first, bone by the time the water's near
+    const u = clamp((now - meltStart) / 1000 / (FALL_TIME * BURN_FALL_END), 0, 1);
+    burnAmt = lerp(meltBurn0, 1.08, u * u * (3 - 2 * u));
+    spawnWax(dt);
     if (now - meltStart > FALL_TIME * 1000) {
       altitude = 0;                   // in the water: cut to the results
       endFlight(flight.flown, true);
@@ -1163,8 +1229,8 @@ function sunState(now) {
   const c = sunCam();
   if (c[2] <= 0.05) return { x: 0, y: 0, r: 0, flare, face: 0 };     // behind you
   const [x, y] = toScreen(c);
-  // Its face only resolves when you're very close
-  const face = mode === "melt" ? 0 : clamp((r / SUN_MAX_R - FACE_FROM) / (1 - FACE_FROM), 0, 1);
+  // Its face resolves as you near it
+  const face = mode === "melt" ? 0 : clamp((r / SUN_FACE_R - FACE_FROM) / (1 - FACE_FROM), 0, 1);
   return { x, y, r, flare, face };
 }
 
@@ -1271,33 +1337,70 @@ function drawSun(now, s) {
     limb.push([s.x + Math.cos(a) * R * w, s.y + Math.sin(a) * R * w]);
   }
   wirePoly(limb, Math.min(1, base + 0.15));
+  drawCorona(s, now);
   if (s.face > 0.02) drawSunFace(s, now);
 }
 
+// The corona: flame tongues off the limb, short and lazy from afar, long and roaring up close
+function drawCorona(s, now) {
+  const f = s.flare, R = s.r, t = now / 1000;
+  const n = Math.round(lerp(14, CORONA_N, f));
+  const b = 0.3 + 0.7 * f;
+  for (let i = 0; i < n; i++) {
+    const a0 = (i / n) * Math.PI * 2 + t * 0.15 * (1 + 2 * f);
+    // each tongue flickers in length and leans with the spin
+    const len = R * (0.06 + 0.5 * f * (0.5 + 0.5 * Math.sin(t * (6 + 9 * f) + i * 1.7)) + 0.04 * Math.random() * f);
+    const lean = 0.25 * Math.sin(t * 3 + i) * f;
+    const x0 = s.x + Math.cos(a0) * R * 1.01, y0 = s.y + Math.sin(a0) * R * 1.01;
+    const x1 = s.x + Math.cos(a0 + lean * 0.5) * (R + len * 0.55), y1 = s.y + Math.sin(a0 + lean * 0.5) * (R + len * 0.55);
+    const x2 = s.x + Math.cos(a0 + lean) * (R + len), y2 = s.y + Math.sin(a0 + lean) * (R + len);
+    wire(x0, y0, x1, y1, b); wire(x1, y1, x2, y2, b * 0.7);
+    if (f > 0.5 && Math.random() < (f - 0.5) * 0.5)              // sparks thrown off the tips
+      wireDot(x2 + (Math.random() - 0.5) * 20, y2 + (Math.random() - 0.5) * 20, 2 + Math.random() * 2, b);
+  }
+}
+
 // The face: eyes, nose, mouth. Far off it's scattered fragments; very close, they pull together.
+// With heat the brows come down, the eyes narrow, the mouth opens: it does not want you here.
 function drawSunFace(s, now) {
-  const R = s.r, a = s.face, scatter = (1 - a) * R * 0.45, tw = now / 110;
-  const J = () => (Math.random() - 0.5) * (scatter + s.flare * s.flare * R * 0.02);
+  const R = s.r, a = s.face, f = s.flare, scatter = (1 - a) * R * 0.45, tw = now / 110;
+  const J = () => (Math.random() - 0.5) * (scatter + f * f * R * 0.025);
   const P = (u, v) => [s.x + u * R + J(), s.y + v * R + J()];
   const b = 0.25 + 0.75 * a;
-  for (const ex of [-0.32, 0.32]) {                                // eyes: narrow closed curves
-    const eye = [];
+  for (const sd of [-1, 1]) {
+    const ex = sd * 0.32, eye = [];
+    const h = 0.05 + 0.02 * Math.sin(tw * 0.3) - 0.03 * f;         // narrowing
     for (let i = 0; i <= 10; i++) {
       const t = (i / 10) * Math.PI * 2;
-      eye.push(P(ex + Math.cos(t) * 0.13, -0.18 + Math.sin(t) * (0.05 + 0.02 * Math.sin(tw * 0.3))));
+      eye.push(P(ex + Math.cos(t) * 0.13, -0.18 + Math.sin(t) * Math.max(0.012, h)));
     }
     wirePoly(eye, b);
+    if (f > 0.15) {                                                // brows, angled down toward the nose
+      const k = (f - 0.15) / 0.85;
+      wirePoly([P(ex - sd * 0.18, -0.34 + 0.02 * k), P(ex + sd * 0.1, -0.32 + 0.1 * k)], b * k);
+    }
+    if (f > 0.6) wireDot(s.x + ex * R, s.y - 0.18 * R, 3 + 3 * f, b);   // a pupil, fixed on you
   }
   wirePoly([P(0, -0.1), P(0.05, 0.12), P(-0.03, 0.15)], b * 0.8);  // nose
-  const mouth = [];                                                // mouth: a slight downturn
-  for (let i = 0; i <= 10; i++) { const u = -0.3 + (i / 10) * 0.6; mouth.push(P(u, 0.42 - 0.06 * (1 - (u / 0.3) ** 2))); }   // corners lower
-  wirePoly(mouth, b);
+  const open = 0.22 * f * (0.7 + 0.3 * Math.sin(tw * 0.5));         // the mouth opens with heat
+  const top = [], bot = [];
+  for (let i = 0; i <= 12; i++) {
+    const u = -0.3 + (i / 12) * 0.6, e = 1 - (u / 0.3) ** 2;
+    top.push(P(u, 0.42 - 0.06 * e - open * 0.25 * e));
+    bot.push(P(u, 0.42 - 0.06 * e + open * e));
+  }
+  wirePoly(top, b);
+  if (open > 0.01) {
+    wirePoly(bot, b);
+    for (let i = 1; i < 12; i += 2) wire(top[i][0], top[i][1], top[i][0], top[i][1] + open * R * 0.4 * (1 - ((i / 12 - 0.5) * 2) ** 2), b * 0.6);   // teeth
+  }
 }
 
 // ---------- The sun lies: at high heat it briefly duplicates or drifts ----------
 function updateLie(now, dt) {
   if (lie && now > lie.end) lie = null;
-  if (!lie && heat > LIE_HEAT && Math.random() < dt / LIE_EVERY) {
+  const every = lerp(LIE_EVERY, 0.8, clamp((heat - LIE_HEAT) / (1 - LIE_HEAT), 0, 1));
+  if (!lie && heat > LIE_HEAT && Math.random() < dt / every) {
     const dur = 700 + Math.random() * 600;
     lie = { start: now, end: now + dur, kind: Math.random() < 0.5 ? "double" : "drift",
             dx: (Math.random() < 0.5 ? -1 : 1) * (0.5 + Math.random() * 0.5), dy: (Math.random() - 0.5) * 0.6 };
@@ -1401,7 +1504,7 @@ function drawVisor() {
 // letters glitch into Latin and symbols. Each column has a depth: size + brightness.
 const RAIN_SIZES = [11, 15, 21];
 function rainDensity() { return mode === "melt" ? 0.6 : clamp(altitude * 0.6 + heat * 0.6, 0, 1); }
-function sunGlitch() { return clamp((altitude - 0.6) / 0.4, 0, 1) * (0.3 + 0.7 * sunAim) * 0.6; }
+function sunGlitch() { return heat * (0.4 + 0.6 * sunAim) * 0.7; }
 function rainChar() {
   return Math.random() < sunGlitch() ? LATIN[(Math.random() * LATIN.length) | 0] : GREEK[(Math.random() * GREEK.length) | 0];
 }
@@ -1481,6 +1584,8 @@ function handPose(now, side) {
   const trem = heat * heat * 0.008 + (mode === "melt" ? 0.004 : 0);
   const base = [side * HAND_BASE[0], HAND_BASE[1], HAND_BASE[2]];
   base[1] += 0.012 * Math.sin(t * 1.3 + side * 0.4);                         // breathing
+  base[1] += 0.06 * clamp((altitude - SEA_LINE) / (1 - SEA_LINE), 0, 1);      // reaching higher as you climb
+  base[2] -= 0.05 * heat;                                                     // drawn toward the sun
   base[0] += Math.sin(t * 0.8 + side * 2) * 0.01 * (1 + 2 * sp) + side * 0.03 * sp;   // drift with speed
   base[1] += Math.sin(t * 1.1 + side) * 0.008 * (1 + 2 * sp) - 0.04 * sp + (Math.random() - 0.5) * 0.004 * sp;
   base[1] += -side * bank * 0.22;                     // bank left (bank > 0) raises the left hand
@@ -1492,8 +1597,10 @@ function handPose(now, side) {
     base: b,
     pitch: lerp(HAND_PITCH + 0.03 * Math.sin(t * 1.3), 0.05, cover),
     roll: lerp(side * HAND_INWARD, side * 0.1, cover) - bank * 0.35 * (1 - cover),
-    splay: lerp(1, 3.2, cover),                       // fingers spread to see through
-    curl: (j, fi) => lerp((0.22 + 0.08 * Math.sin(t * 0.9 + fi * 0.7 + side)) * [0.8, 1, 0.7][j], 0, cover),
+    splay: lerp(1 + 0.08 * Math.sin(t * 0.6 + side), 3.2, cover),   // fingers spread to see through
+    // each finger flexes on its own slow phase; the pinky and ring curl a little more
+    curl: (j, fi) => lerp((0.2 + 0.09 * Math.sin(t * (0.8 + fi * 0.13) + fi * 1.9 + side) + 0.04 * (fi === 3 ? 1 : fi === 2 ? 0.5 : 0))
+                          * [0.8, 1, 0.7][j], 0, cover),
   };
 }
 
@@ -1512,6 +1619,9 @@ function buildHand(side, P) {
   const palmZ = x => 0.06 * (x / 0.2) ** 2;                        // slight cup across the palm
   const L3 = (p, q, t) => [lerp(p[0], q[0], t), lerp(p[1], q[1], t), lerp(p[2], q[2], t)];
 
+  // Each phalanx is drawn as SUB curved pieces: the bend is spread along it, the width tapers
+  // smoothly, and the flesh outline is a soft curve rather than a jointed stick.
+  const SUB = 3;
   const chain = (fg, fi, isThumb) => {
     const splay = fg.splay * P.splay;
     const dx = Math.sin(splay), dy = Math.cos(splay);             // along the finger
@@ -1520,28 +1630,38 @@ function buildHand(side, P) {
     let p = [fg.x, fg.y, palmZ(fg.x)], ang = isThumb ? 0.35 : 0;
     const u0 = isThumb ? 0.05 : 0;
     for (let j = 0; j < 3; j++) {
-      ang += P.curl(j, fi);                                        // curl toward the palm (+z)
-      const Ln = fg.len[j];
-      const q = [p[0] + dx * Math.cos(ang) * Ln, p[1] + dy * Math.cos(ang) * Ln, p[2] + Math.sin(ang) * Ln];
+      const curl = P.curl(j, fi), Ln = fg.len[j];
       const w0 = fg.w * (1 - 0.12 * j), w1 = fg.w * (1 - 0.12 * (j + 1));
       const u = u0 + (2 - j) * 0.13;                               // fingertips burn first
-      F(off(p, -w0), off(q, -w1), u);                              // flesh: both sides
-      F(off(p, w0), off(q, w1), u);
+      const p0 = p, a0 = ang;
       F(off(p, -w0 * 0.7, -0.01), off(p, w0 * 0.7, -0.01), u + 0.03);   // joint crease
-      B(L3(p, q, 0.12), L3(p, q, 0.88), u);                        // bone, with a gap at each joint
-      const jr = w0 * 0.35;                                        // joint marker
-      B([p[0] - jr, p[1], p[2]], [p[0], p[1] + jr, p[2]], u); B([p[0], p[1] + jr, p[2]], [p[0] + jr, p[1], p[2]], u);
-      B([p[0] + jr, p[1], p[2]], [p[0], p[1] - jr, p[2]], u); B([p[0], p[1] - jr, p[2]], [p[0] - jr, p[1], p[2]], u);
+      for (let s = 0; s < SUB; s++) {
+        ang = a0 + curl * (s + 1) / SUB;                             // the bend spreads along the phalanx
+        const L = Ln / SUB, ws = lerp(w0, w1, s / SUB), we = lerp(w0, w1, (s + 1) / SUB);
+        const pad = 1 + 0.12 * Math.sin(((s + 0.5) / SUB) * Math.PI) * (j === 2 ? 1 : 0.5);   // a little fullness
+        const q = [p[0] + dx * Math.cos(ang) * L, p[1] + dy * Math.cos(ang) * L, p[2] + Math.sin(ang) * L];
+        F(off(p, -ws * pad), off(q, -we * pad), u + 0.02 * s);     // flesh: both sides
+        F(off(p, ws * pad), off(q, we * pad), u + 0.02 * s);
+        p = q;
+      }
+      const q = p;
+      B(L3(p0, q, 0.12), L3(p0, q, 0.88), u);                      // bone, with a gap at each joint
+      const jr = w0 * 0.35;                                        // joint: a small diamond
+      B([p0[0] - jr, p0[1], p0[2]], [p0[0], p0[1] + jr, p0[2]], u); B([p0[0], p0[1] + jr, p0[2]], [p0[0] + jr, p0[1], p0[2]], u);
+      B([p0[0] + jr, p0[1], p0[2]], [p0[0], p0[1] - jr, p0[2]], u); B([p0[0], p0[1] - jr, p0[2]], [p0[0] - jr, p0[1], p0[2]], u);
       if (j === 2) {
-        const tc = [q[0] + dx * Math.cos(ang) * w1 * 0.8, q[1] + dy * Math.cos(ang) * w1 * 0.8, q[2] + Math.sin(ang) * w1 * 0.8];
-        F(off(q, -w1), tc, u); F(tc, off(q, w1), u);              // fingertip
-        const n0 = L3(p, q, 0.45);                                 // fingernail, on the back
-        F(off(n0, -w1 * 0.55, -0.012), off(q, -w1 * 0.55, -0.012), u);
-        F(off(n0, w1 * 0.55, -0.012), off(q, w1 * 0.55, -0.012), u);
+        // fingertip: a rounded cap of three pieces
+        const ex = dx * Math.cos(ang), ey = dy * Math.cos(ang), ez = Math.sin(ang);
+        const tc = [q[0] + ex * w1 * 0.9, q[1] + ey * w1 * 0.9, q[2] + ez * w1 * 0.9];
+        const t1 = [q[0] + ex * w1 * 0.6 - sx * w1 * 0.7, q[1] + ey * w1 * 0.6 - sy * w1 * 0.7, q[2] + ez * w1 * 0.6];
+        const t2 = [q[0] + ex * w1 * 0.6 + sx * w1 * 0.7, q[1] + ey * w1 * 0.6 + sy * w1 * 0.7, q[2] + ez * w1 * 0.6];
+        F(off(q, -w1), t1, u); F(t1, tc, u); F(tc, t2, u); F(t2, off(q, w1), u);
+        const n0 = L3(p0, q, 0.5);                                 // fingernail, on the back
+        F(off(n0, -w1 * 0.55, -0.012), off(q, -w1 * 0.5, -0.012), u);
+        F(off(n0, w1 * 0.55, -0.012), off(q, w1 * 0.5, -0.012), u);
         F(off(n0, -w1 * 0.55, -0.012), off(n0, w1 * 0.55, -0.012), u);
         tips.push(X(...tc));
       }
-      p = q;
     }
   };
   FINGERS.forEach((fg, i) => chain(fg, i, false));
@@ -1550,13 +1670,16 @@ function buildHand(side, P) {
   // Palm: knuckle ridge, sides, thumb web, wrist, forearm (flesh)
   const P3 = (x, y, dz = 0) => [x, y, palmZ(x) + dz];
   const kn = FINGERS.map(f => P3(f.x, f.y, -0.02));
-  for (let i = 1; i < kn.length; i++) F(kn[i - 1], kn[i], 0.42);
-  F(P3(-0.215, 0.5), kn[0], 0.45); F(kn[3], P3(0.205, 0.47), 0.45);
-  F(P3(-0.215, 0.5), P3(-0.205, 0.27), 0.55);
-  F(P3(-0.205, 0.27), P3(THUMB.x + 0.03, THUMB.y + 0.1), 0.6);    // thumb web
-  F(P3(0.205, 0.47), P3(0.19, 0.12), 0.62);
-  F(P3(0.19, 0.12), P3(0.17, 0), 0.75);
-  F(P3(-0.2, 0.08), P3(-0.17, 0), 0.75);
+  for (let i = 1; i < kn.length; i++) {                            // knuckle ridge: a gentle arch between each pair
+    const m = L3(kn[i - 1], kn[i], 0.5); m[1] += 0.012;
+    F(kn[i - 1], m, 0.42); F(m, kn[i], 0.42);
+  }
+  // the outline, as short pieces so it reads as a curve
+  const outline = (pts, u) => { for (let i = 1; i < pts.length; i++) F(pts[i - 1], pts[i], u + (i / pts.length) * 0.1); };
+  outline([kn[3], P3(0.21, 0.5), P3(0.215, 0.38), P3(0.205, 0.24), P3(0.19, 0.12), P3(0.175, 0.04), P3(0.17, 0)], 0.5);          // pinky side
+  outline([kn[0], P3(-0.215, 0.5), P3(-0.218, 0.4), P3(-0.205, 0.27)], 0.5);                                                    // index side
+  outline([P3(-0.205, 0.27), P3(-0.2, 0.2), P3(THUMB.x + 0.02, THUMB.y + 0.1)], 0.6);                                          // thumb web
+  outline([P3(THUMB.x - 0.02, THUMB.y - 0.02), P3(-0.2, 0.06), P3(-0.17, 0)], 0.75);                                          // heel of the thumb
   F(P3(-0.17, 0), P3(0.17, 0), 0.82);                              // wrist crease
   F(P3(-0.17, 0), [-0.21, -0.45, 0.02], 0.92); F(P3(0.17, 0), [0.22, -0.45, 0.02], 0.92);   // forearm
   // Palm bones: metacarpals, the thumb's, a ring of carpals, radius and ulna
@@ -1603,7 +1726,7 @@ function drawBody(now) {
     const { segs, tips } = buildHand(side, handPose(now, side));
     for (const tp of tips) { const s = proj(tp); handTips.push({ x: s[0], y: s[1] }); }
     for (const sg of segs) {
-      const a = proj(sg.a), b = proj(sg.b), d = depth((a[2] + b[2]) / 2), f = heat - sg.burn;
+      const a = proj(sg.a), b = proj(sg.b), d = depth((a[2] + b[2]) / 2), f = burnAmt - sg.burn;
       if (sg.bone) {                                  // bones show where the flesh has gone
         const reveal = clamp((f + 0.06) / 0.12, 0, 1);
         if (reveal <= 0.02) continue;
@@ -1615,8 +1738,14 @@ function drawBody(now) {
         continue;
       }
       if (f < -0.12) burnt.delete(sg.id);             // cooled: the flesh grows back
-      if (f > -0.08) {                                // charring: flickers and darkens first
-        if (Math.random() < ((f + 0.08) / 0.08) * 0.5) continue;
+      if (f > -0.08) {                                // charring: flickers and darkens first, sparks lift off
+        const k = (f + 0.08) / 0.08;
+        if (embers.length < EMBER_CAP && Math.random() < k * 0.35) {
+          const u = Math.random();
+          embers.push({ x: lerp(a[0], b[0], u), y: lerp(a[1], b[1], u), vx: (Math.random() - 0.5) * 30,
+                        vy: -40 - Math.random() * 70, life: 0, max: 0.5 + Math.random() * 0.8, s: 1.5 + Math.random() * 1.5 });
+        }
+        if (Math.random() < k * 0.5) continue;
         charP.moveTo(a[0], a[1]); charP.lineTo(b[0], b[1]);
         continue;
       }
@@ -1625,7 +1754,11 @@ function drawBody(now) {
     }
   }
   ctx.save();
-  ctx.lineCap = "round";
+  ctx.lineCap = "round"; ctx.lineJoin = "round";
+  // a soft glow under the flesh lines, warmer with heat
+  ctx.strokeStyle = heat > 0.3 ? `rgba(255, ${Math.round(90 - 60 * heat)}, 20, ${0.14 + 0.1 * heat})` : HAND_GLOW;
+  ctx.lineWidth = 5;
+  for (let i = 0; i < WIRE_LEVELS; i++) { ctx.globalAlpha = 0.3 + 0.7 * (i / (WIRE_LEVELS - 1)); ctx.stroke(fleshP[i]); }
   for (let i = 0; i < WIRE_LEVELS; i++) {
     const t = i / (WIRE_LEVELS - 1);
     ctx.lineWidth = 1 + t * 1.2;
@@ -1636,11 +1769,23 @@ function drawBody(now) {
   ctx.globalAlpha = 0.55 + Math.random() * 0.4;
   ctx.lineWidth = 1.6; ctx.strokeStyle = CHAR; ctx.stroke(charP);
   ctx.strokeStyle = CHAR; ctx.lineWidth = 1.4;
-  for (const f of frags) {                            // embers, cooling as they fall
+  for (const f of frags) {                            // flakes of burnt flesh, cooling as they fall
     ctx.globalAlpha = 1 - f.life / f.max;
     ctx.beginPath(); ctx.moveTo(f.cx - f.hx, f.cy - f.hy); ctx.lineTo(f.cx + f.hx, f.cy + f.hy); ctx.stroke();
   }
+  for (const e of embers) {                           // sparks, orange to red as they rise and die
+    const k = e.life / e.max;
+    ctx.globalAlpha = 1 - k;
+    ctx.fillStyle = k < 0.4 ? "rgb(255, 180, 60)" : k < 0.7 ? CHAR : RED;
+    ctx.fillRect(e.x - e.s / 2, e.y - e.s / 2, e.s, e.s);
+  }
   ctx.restore();
+}
+function updateEmbers(dt) {
+  embers = embers.filter(e => {
+    e.life += dt; e.x += e.vx * dt + Math.sin(e.life * 9) * 12 * dt; e.y += e.vy * dt; e.vy *= 1 - 0.8 * dt;
+    return e.life < e.max;
+  });
 }
 
 // Hard turns and dives shed a few feathers off the hands
@@ -1772,7 +1917,7 @@ function drawGhosts() {
       if (has) {
         const mx = (x + px) / 2, mz = (z + pz) / 2;
         const d = Math.hypot(mx - view.x, mz - travel);
-        if (d < far && fwdOf(mx, mz) > -2) seg3(px, py, pz, x, y, z, 0.22 * age * (0.3 + 0.7 * depthB(d, far)));
+        if (d < far && (vloop || fwdOf(mx, mz) > -2)) seg3(px, py, pz, x, y, z, 0.22 * age * (0.3 + 0.7 * depthB(d, far)));
       }
       px = x; pz = z; py = y; has = true;
     }
@@ -1831,8 +1976,8 @@ function drawSea(now, amt) {
 
 // ---------- Horizon: the line at infinity, tilted by pitch and roll ----------
 function drawHorizon() {
-  if (view.cp <= 0.01) return;
-  const y0 = focal * Math.tan(view.pitch);        // below centre when looking up
+  if (Math.abs(view.cp) <= 0.02) return;
+  const y0 = clamp(focal * view.sp / view.cp, -1e5, 1e5);   // below centre when looking up; flips when inverted
   const ends = [[-W, y0], [W, y0]].map(([a, b]) => [W / 2 + a * view.cr - b * view.sr, H / 2 + a * view.sr + b * view.cr]);
   wire(ends[0][0], ends[0][1], ends[1][0], ends[1][1], 0.9);
 }
@@ -1841,13 +1986,13 @@ function drawHorizon() {
 // Lines in both world axes over a square centred ahead of you, sliced so each piece
 // fades by its own distance; pieces behind you or past the fade are skipped.
 function drawGround() {
-  const half = (GRID_LINES * GRID) / 2;
-  const cx = Math.round((view.x + view.hx * (half - 4)) / GRID) * GRID;
-  const cz = Math.round((travel + view.hz * (half - 4)) / GRID) * GRID;
+  const half = (GRID_LINES * GRID) / 2, bias = vloop ? 0 : half - 4;
+  const cx = Math.round((view.x + view.hx * bias) / GRID) * GRID;
+  const cz = Math.round((travel + view.hz * bias) / GRID) * GRID;
   const SL = 4;                                     // slice length
   const piece = (x1, z1, x2, z2) => {
     const mx = (x1 + x2) / 2, mz = (z1 + z2) / 2;
-    if (fwdOf(mx, mz) < -SL) return;
+    if (!vloop && fwdOf(mx, mz) < -SL) return;
     const d = Math.hypot(mx - view.x, mz - travel);
     if (d > VIEW_FAR) return;
     seg3(x1, 0, z1, x2, 0, z2, depthB(d, VIEW_FAR) * clamp((VIEW_FAR - d) / 4, 0, 1));
@@ -1935,7 +2080,7 @@ function drawSpeedLines() {
 
 // ---------- The far skyline: a jagged range all round, fixed by world bearing ----------
 function drawRidge() {
-  const half = 1.5;                                   // radians each side of the heading
+  const half = Math.PI;                               // all the way round (behind-the-camera pieces clip away)
   const hAt = a => 2.5 + 2.2 * Math.abs(Math.sin(a * 3 + RIDGE_SEED)) + 1.6 * Math.sin(a * 7.3 + RIDGE_SEED * 2)
                  + 0.9 * Math.sin(a * 17 + RIDGE_SEED * 3) + 0.5 * Math.sin(a * 41);
   let px = 0, py = 0, pz = 0, has = false;
@@ -2080,8 +2225,9 @@ function drawWorld(now, dt, sun) {
 
 // ---------- Wax ----------
 function spawnWax(dt) {
-  if (heat < 0.04 || !handTips.length) return;
-  const rate = heat * heat * 6;           // drops per second, per fingertip
+  const hot = Math.max(heat, burnAmt);
+  if (hot < 0.04 || !handTips.length) return;
+  const rate = hot * hot * 6;             // drops per second, per fingertip
   for (const tip of handTips) {
     if (wax.length >= WAX_CAP) return;
     if (Math.random() < rate * dt) {
@@ -2188,14 +2334,6 @@ $("reach").onclick = async () => {
     await new Promise(res => setTimeout(res, 150));
     fit();
 
-    // One combined stream for every flight's recording
-    if (canvas.captureStream) {
-      recStream = new MediaStream([
-        ...canvas.captureStream(30).getVideoTracks(),
-        ...audio.recDest.stream.getAudioTracks(),
-      ]);
-    }
-
     $("intro").classList.add("hidden");
     mode = "live";
     loop();
@@ -2206,8 +2344,6 @@ $("reach").onclick = async () => {
   }
 };
 
-$("save").onclick = saveFlight;
-
 $("again").onclick = () => {
   if (!document.fullscreenElement) {
     try { document.documentElement.requestFullscreen({ navigationUI: "hide" }).catch(e => console.warn("Fullscreen failed", e)); }
@@ -2217,7 +2353,8 @@ $("again").onclick = () => {
   altitude = 0; altVel = 0; heat = 0; seaSince = 0;
   wax = []; feathers = []; figures = []; visorDrops = []; frags = []; burnt.clear();
   lie = null; lieTextUntil = 0; tilt = null;
-  barrel = null; barrelCool = 0; rollHist.length = 0;
+  barrel = null; vloop = null; barrelCool = 0; rollHist.length = 0; pitchHist.length = 0;
+  embers = []; burnAmt = 0;
   // Back to the start, facing the sun; the world is laid out fresh ahead
   view.x = 0; travel = 0; view.yaw = 0; view.hx = 0; view.hz = 1; view.cy = 1; view.sy = 0;
   view.h = CAM_H_SEA; view.pitch = 0; bank = 0; yawRate = 0; fwdSpeed = SPEED_BASE;
