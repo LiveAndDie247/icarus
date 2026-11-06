@@ -108,11 +108,26 @@ const YAW_RATE = 1.3;                 // radians / s of turn at full phone roll
 const CAM_PITCH_TILT = 0.25;          // extra camera nose up/down from the phone's pitch (radians at full)
 const FOV_WIDEN = 0.35;               // field of view widens in a dive (focal / 1.35 at full)
 const CAM_TAU = 0.1;                  // camera easing time constant, seconds
-const SUN_ELEV = 41 * Math.PI / 180;  // the sun: fixed in the world, this far above the horizon
+// THE SUN: a fixed place in the world, far ahead and high. You fly toward it; it grows as you near it.
+// Every flight starts at the origin, facing it (world +z).
+const SUN_X = 0, SUN_Y = 90, SUN_Z = 300;
+const SUN_WORLD_R = 45;               // its radius in world units (sets how big it looks at a distance)
 const AIM_CONE = 14 * Math.PI / 180;  // heat only builds with the sun within this angle of centre
-const GRID = 2, GRID_LINES = 20;      // ground grid spacing, lines per axis
-const VIEW_FAR = 36;                  // depth-fade distance
-const MOUNTAIN_N = 8, TOWER_N = 5, CLOUD_N = 4, SPEED_N = 50;
+const GRID = 2, GRID_LINES = 28;      // ground grid spacing, lines per axis
+const VIEW_FAR = 56;                  // depth-fade distance
+const MOUNTAIN_N = 14, TOWER_N = 8, CLOUD_N = 6, SPEED_N = 50;
+const COLUMN_N = 5, MAZE_N = 5, RING_N = 6, BIGF_N = 3;   // ruins, labyrinth walls, rings in the air, giant feathers
+const RIDGE_D = 50, RIDGE_N = 56;     // far skyline: distance, segments across the view
+const COLOSSUS_SCALE = 9;             // one giant figure standing far off
+
+// Barrel rolls: a hard sideways flick of the phone (or a double-tap on one half of the screen; Q/E on a keyboard)
+const BARREL_TIME = 0.95;             // seconds for the full 360
+const BARREL_R = 0.7;                 // radius of the helix the camera flies around
+const BARREL_FLICK = 0.88;            // roll input you must pass...
+const BARREL_FLICK_RATE = 4.5;        // ...this fast (input units per second)
+const BARREL_FLICK_FROM = 0.45;       // ...having been below this a moment earlier
+const BARREL_COOL = 0.35;             // seconds before another can start
+const DOUBLE_TAP = 320;               // ms
 const CLOUD_SPLIT = 5;                // clouds start parting this far ahead
 const WIRE_LEVELS = 8;                // brightness buckets for batched line drawing
 
@@ -222,6 +237,11 @@ const view = { x: 0, h: CAM_H_SEA, yaw: 0, pitch: 0, roll: 0, cy: 1, sy: 0, hx: 
 let focal = FOCAL;                    // widens (smaller) in a dive
 let viewAlt = 0;                      // altitude the camera shows (falls during the melt)
 let travel = 0;                       // the camera's world z
+const camOff = { x: 0, y: 0, z: 0 };  // temporary camera displacement (the barrel roll's helix)
+let barrel = null;                    // { start, dir }: a barrel roll in progress (dir +1 right, −1 left)
+let barrelCool = 0;                   // seconds until another may start
+const rollHist = [];                  // recent [time, rollIn] pairs, for flick detection
+let lastTap = { t: -1e9, x: 0 };      // for double-tap barrel rolls
 let fwdSpeed = SPEED_BASE;            // world units / s, always forward
 let bank = 0, bankTarget = 0;         // camera roll from the phone's roll
 let yawRate = 0, yawTarget = 0;       // turn rate from the phone's roll
@@ -252,10 +272,16 @@ let frags = [];                       // burnt flesh falling away: { cx, cy, hx,
 let rain = [];                        // Greek rain columns
 
 // Wire scenery in world coordinates (spawned ahead along the current heading)
-const mountains = Array.from({ length: MOUNTAIN_N }, () => spawnMountain({}, 6 + Math.random() * 34));
-const towers = Array.from({ length: TOWER_N }, () => spawnTower({}, 4 + Math.random() * 30));
+const mountains = Array.from({ length: MOUNTAIN_N }, () => spawnMountain({}, 6 + Math.random() * 48));
+const towers = Array.from({ length: TOWER_N }, () => spawnTower({}, 4 + Math.random() * 46));
 const cloudShapes = Array.from({ length: CLOUD_N }, (_, i) => spawnCloud({}, 8 + i * 8 + Math.random() * 4));
 const speedLines = Array.from({ length: SPEED_N }, () => spawnSpeed({}, 1 + Math.random() * 20));
+const columns = Array.from({ length: COLUMN_N }, () => spawnColumns({}, 6 + Math.random() * 46));
+const mazes = Array.from({ length: MAZE_N }, () => spawnMaze({}, 6 + Math.random() * 46));
+const rings = Array.from({ length: RING_N }, () => spawnRing({}, 8 + Math.random() * 44));
+const bigFeathers = Array.from({ length: BIGF_N }, () => spawnBigFeather({}, 10 + Math.random() * 40));
+const colossus = spawnColossus({}, 30 + Math.random() * 20);
+const RIDGE_SEED = Math.random() * 100;
 
 let feathers = [], wax = [];
 
@@ -276,8 +302,8 @@ function place(o, ahead, lat) {
   return o;
 }
 // Forward / sideways distance of a world point from the camera, along the heading
-const fwdOf = (x, z) => (x - view.x) * view.hx + (z - travel) * view.hz;
-const latOf = (x, z) => (x - view.x) * view.hz - (z - travel) * view.hx;
+function fwdOf(x, z) { return (x - view.x) * view.hx + (z - travel) * view.hz; }
+function latOf(x, z) { return (x - view.x) * view.hz - (z - travel) * view.hx; }
 
 // Jagged mountain ridge at the side, facing the heading it was spawned on:
 // profile of (u 0..1 across, h 0..1 up), laid out along (ax, az)
@@ -323,13 +349,90 @@ function spawnSpeed(p, ahead) {
   return p;
 }
 
+// Ruins: a row of fluted columns, some broken off, with a lintel across the whole ones
+function spawnColumns(c, ahead) {
+  c.ax = view.hz; c.az = -view.hx;                     // the row runs across the heading
+  c.n = 2 + ((Math.random() * 4) | 0);
+  c.h = 2 + Math.random() * 2.5;
+  c.gap = 0.9 + Math.random() * 0.4;
+  place(c, ahead, side() * (2 + Math.random() * 14) - (c.n * c.gap) / 2);
+  c.cols = Array.from({ length: c.n }, () => (Math.random() < 0.4 ? 0.3 + Math.random() * 0.45 : 1));   // 1 = whole
+  return c;
+}
+
+// Labyrinth: a fragment of Daedalus' maze, low walls along a random walk on the ground grid
+function spawnMaze(m, ahead) {
+  place(m, ahead, side() * (1 + Math.random() * 12));
+  m.x = Math.round(m.x / GRID) * GRID; m.z = Math.round(m.z / GRID) * GRID;   // snapped to the grid
+  m.h = 0.5 + Math.random() * 0.4;
+  m.walls = [];
+  let x = 0, z = 0, dir = (Math.random() * 4) | 0;
+  const steps = 4 + ((Math.random() * 5) | 0);
+  for (let i = 0; i < steps; i++) {
+    if (Math.random() < 0.6) dir = (dir + (Math.random() < 0.5 ? 1 : 3)) % 4;   // mostly turning
+    const dx = [1, 0, -1, 0][dir] * GRID, dz = [0, 1, 0, -1][dir] * GRID;
+    m.walls.push([x, z, x + dx, z + dz]);
+    x += dx; z += dz;
+  }
+  return m;
+}
+
+// Rings in the air, facing the heading: fly through one for a chime
+function spawnRing(r, ahead) {
+  r.ax = view.hz; r.az = -view.hx;
+  place(r, ahead, (Math.random() - 0.5) * 8);
+  r.y = 0.9 + Math.random() * 3.4;                     // within reach of the camera's heights
+  r.r = 1.1 + Math.random() * 0.5;
+  r.prevFwd = fwdOf(r.x, r.z);
+  r.hit = -1e9;
+  return r;
+}
+
+// Giant feathers drifting down from somewhere above, turning slowly
+function spawnBigFeather(f, ahead) {
+  place(f, ahead, side() * (3 + Math.random() * 14));
+  f.y = view.h + 5 + Math.random() * 8;
+  f.vy = -(0.25 + Math.random() * 0.25);
+  f.len = 2 + Math.random() * 1.5;
+  f.ang = Math.random() * 6.28; f.spin = (Math.random() < 0.5 ? -1 : 1) * (0.2 + Math.random() * 0.3);
+  f.sway = Math.random() * 6.28;
+  return f;
+}
+
+// The colossus: one of the father's kind, but enormous, standing far off, facing nothing
+function spawnColossus(c, ahead) {
+  place(c, ahead, side() * (10 + Math.random() * 14));
+  return c;
+}
+
+// Respawn an object that left the view: far ahead if it passed behind you, anywhere ahead if a
+// turn swept it off to the side (so the scene refills instead of leaving a gap after a turn)
+function respawn(o, fn, behind, wide) {
+  const f = fwdOf(o.x, o.z);
+  if (f < behind) fn(o, VIEW_FAR * (0.8 + 0.3 * Math.random()));
+  else if (Math.abs(latOf(o.x, o.z)) > wide) fn(o, 8 + Math.random() * (VIEW_FAR - 8));
+}
+// Everything, anywhere ahead (after the position resets on "Fly again")
+function respawnAll() {
+  const any = () => 6 + Math.random() * (VIEW_FAR - 6);
+  for (const m of mountains) spawnMountain(m, any());
+  for (const t of towers) spawnTower(t, any());
+  cloudShapes.forEach((c, i) => spawnCloud(c, 8 + i * 8 + Math.random() * 4));
+  for (const p of speedLines) spawnSpeed(p, 1 + Math.random() * 20);
+  for (const c of columns) spawnColumns(c, any());
+  for (const m of mazes) spawnMaze(m, any());
+  for (const r of rings) spawnRing(r, any());
+  for (const f of bigFeathers) spawnBigFeather(f, 10 + Math.random() * 40);
+  spawnColossus(colossus, 30 + Math.random() * 20);
+}
+
 // ---------- Camera projection ----------
 // World offset → camera space [x, y, depth]: yaw, then pitch; roll is applied on screen.
 function dirCam(dx, dy, dz) {          // also used directly for directions (points at infinity)
   const rx = dx * view.cy - dz * view.sy, rz = dx * view.sy + dz * view.cy;
   return [rx, dy * view.cp - rz * view.sp, dy * view.sp + rz * view.cp];
 }
-function toCam(x, y, z) { return dirCam(x - view.x, y - view.h, z - travel); }
+function toCam(x, y, z) { return dirCam(x - view.x - camOff.x, y - view.h - camOff.y, z - travel - camOff.z); }
 function toScreen(c) {
   const k = focal / c[2], sx = c[0] * k, sy = -c[1] * k;
   return [W / 2 + sx * view.cr - sy * view.sr, H / 2 + sx * view.sr + sy * view.cr];
@@ -389,9 +492,60 @@ function updateView(now, dt) {
   view.yaw += yawRate * dt;
   view.cy = Math.cos(view.yaw); view.sy = Math.sin(view.yaw);
   view.hx = view.sy; view.hz = view.cy;
-  view.roll = bank + tiltNow(now);            // the horizon sometimes tilts on its own (renderer failing)
+  // Barrel roll: a full turn about the heading while the camera flies a helix around its line
+  let bRoll = 0;
+  camOff.x = camOff.y = camOff.z = 0;
+  if (barrel) {
+    const u = clamp((now - barrel.start) / 1000 / BARREL_TIME, 0, 1);
+    const th = Math.PI * 2 * u * u * (3 - 2 * u);           // eased: slow in, fast through, slow out
+    bRoll = -barrel.dir * th;                                 // (roll > 0 = banked left)
+    const lat = barrel.dir * BARREL_R * Math.sin(th), up = BARREL_R * (1 - Math.cos(th));
+    camOff.x = view.hz * lat; camOff.z = -view.hx * lat; camOff.y = up;
+    if (u >= 1) { barrel = null; barrelCool = BARREL_COOL; }
+  }
+  view.roll = bank + tiltNow(now) + bRoll;    // the horizon sometimes tilts on its own (renderer failing)
   view.cp = Math.cos(view.pitch); view.sp = Math.sin(view.pitch);
   view.cr = Math.cos(view.roll);  view.sr = Math.sin(view.roll);
+}
+
+// Start a barrel roll (dir +1 = to the right)
+function triggerBarrel(dir, now = performance.now()) {
+  if (mode !== "live" || barrel || barrelCool > 0) return;
+  barrel = { start: now, dir };
+  barrelWhoosh();
+}
+function barrelNow() { return barrel ? 1 : 0; }
+
+// The whoosh: a burst of wind sweeping up and back down
+function barrelWhoosh() {
+  if (!audio) return;
+  const a = audio, t = a.ac.currentTime, T = BARREL_TIME;
+  hold(a.windGain.gain, t); hold(a.windFilter.frequency, t);
+  a.windGain.gain.linearRampToValueAtTime(0.16, t + T * 0.35);
+  a.windGain.gain.linearRampToValueAtTime(0.0001, t + T);
+  a.windFilter.frequency.setValueAtTime(Math.max(120, a.windFilter.frequency.value), t);
+  a.windFilter.frequency.exponentialRampToValueAtTime(2600, t + T * 0.45);
+  a.windFilter.frequency.exponentialRampToValueAtTime(300, t + T);
+  // the voice dips and swoops with it
+  hold(a.wobblePitch.gain, t);
+  a.wobblePitch.gain.linearRampToValueAtTime(60, t + T * 0.4);
+  a.wobblePitch.gain.linearRampToValueAtTime(0, t + T);
+}
+
+// Flying through a ring: a bright chime at the octave, into the reverb
+function ringChime() {
+  if (!audio) return;
+  const a = audio, ac = a.ac, t = ac.currentTime;
+  const hz = Math.max(60, a.osc1.frequency.value) * 2;
+  for (const [mult, g0] of [[1, 0.18], [1.5, 0.07], [2, 0.05]]) {
+    const o = ac.createOscillator(), g = ac.createGain();
+    o.type = "sine"; o.frequency.value = hz * mult;
+    g.gain.setValueAtTime(0.0001, t);
+    g.gain.exponentialRampToValueAtTime(g0, t + 0.01);
+    g.gain.exponentialRampToValueAtTime(0.0001, t + 0.9);
+    o.connect(g); g.connect(a.master); g.connect(a.reverb);
+    o.start(t); o.stop(t + 1);
+  }
 }
 
 // ============================================================
@@ -871,7 +1025,7 @@ function shape(deg, range) {
 }
 
 // Per frame: phone tilt (or keys on a desktop) → pitch and roll inputs → targets
-function readControls() {
+function readControls(now, dt) {
   let p = 0, r = 0;
   if (gyro.seen && !gyro.calibrate) {
     let db = gyro.beta - gyro.beta0;
@@ -883,13 +1037,43 @@ function readControls() {
   if (keys.has("ArrowDown") || keys.has("s")) p = -1;
   if (keys.has("ArrowLeft") || keys.has("a")) r = -1;
   if (keys.has("ArrowRight") || keys.has("d")) r = 1;
+  detectFlick(now, dt, r);
   pitchIn = p; rollIn = r;
   yawTarget = rollIn * YAW_RATE;                 // roll right → turn right
   bankTarget = -rollIn * BANK_MAX;               // (bank > 0 = banked left)
   thrustEff = Math.max(0, -pitchIn);             // diving is thrust
+  if (barrelCool > 0) barrelCool -= dt;
 }
-addEventListener("keydown", e => keys.add(e.key.length === 1 ? e.key.toLowerCase() : e.key));
+
+// A hard, fast flick of the phone sideways: the roll input shoots past BARREL_FLICK,
+// quickly, having been near level a moment before → barrel roll that way
+function detectFlick(now, dt, r) {
+  rollHist.push([now, r]);
+  while (rollHist.length && rollHist[0][0] < now - 400) rollHist.shift();
+  const prev = rollHist.length > 1 ? rollHist[rollHist.length - 2][1] : r;
+  const rate = (r - prev) / Math.max(dt, 1e-3);
+  if (Math.abs(r) < BARREL_FLICK || Math.sign(rate) !== Math.sign(r) || Math.abs(rate) < BARREL_FLICK_RATE) return;
+  const earlier = rollHist.filter(([t]) => t < now - 180 && t > now - 400);
+  if (!earlier.length || earlier.some(([, v]) => Math.abs(v) > BARREL_FLICK_FROM)) return;
+  triggerBarrel(Math.sign(r), now);
+  rollHist.length = 0;
+}
+
+addEventListener("keydown", e => {
+  keys.add(e.key.length === 1 ? e.key.toLowerCase() : e.key);
+  if (e.key === "q") triggerBarrel(-1);
+  if (e.key === "e") triggerBarrel(1);
+  if (e.key === " ") { e.preventDefault(); triggerBarrel(rollIn < 0 ? -1 : 1); }
+});
 addEventListener("keyup", e => keys.delete(e.key.length === 1 ? e.key.toLowerCase() : e.key));
+// Double-tap one half of the screen: barrel roll toward that side
+canvas.addEventListener("pointerdown", e => {
+  const now = performance.now();
+  if (now - lastTap.t < DOUBLE_TAP && Math.abs(e.clientX - lastTap.x) < 80) {
+    triggerBarrel(e.clientX < innerWidth / 2 ? -1 : 1, now);
+    lastTap.t = -1e9;
+  } else lastTap = { t: now, x: e.clientX };
+});
 
 // Altitude physics: climb rate follows the tilt (with a little lag); gravity sinks you slowly
 function updateAltitude(dt) {
@@ -904,8 +1088,8 @@ function updateAltitude(dt) {
 // Game logic (per frame)
 // ============================================================
 function step(now, dt) {
-  if (mode === "live") { readControls(); updateAltitude(dt); }
-  else if (mode === "results") { readControls(); thrustEff = 0; }
+  if (mode === "live") { readControls(now, dt); updateAltitude(dt); }
+  else if (mode === "results") { readControls(now, dt); thrustEff = 0; }
 
   // Always flying forward along the heading: base speed, faster with altitude and when diving.
   // The melt keeps your momentum.
@@ -962,9 +1146,11 @@ function step(now, dt) {
 // ============================================================
 // Rendering: black, dots only, sun, horizon
 // ============================================================
-// ---------- Sun: ahead and above; you approach it (it grows) as you climb ----------
+// ---------- Sun: a fixed place in the world; it grows as you actually get nearer ----------
+const sunDist = () => Math.hypot(SUN_X - view.x, SUN_Y - view.h, SUN_Z - travel);
 function sunRadius() {
-  return lerp(SUN_MIN_R, SUN_MAX_R, clamp(altitude * 0.75 + heat * 0.25, 0, 1));
+  const byDist = clamp(focal * SUN_WORLD_R / sunDist(), SUN_MIN_R, SUN_MAX_R);
+  return lerp(byDist, SUN_MAX_R, heat * 0.3);          // and swells with heat
 }
 
 function sunState(now) {
@@ -982,8 +1168,8 @@ function sunState(now) {
   return { x, y, r, flare, face };
 }
 
-// The sun is a fixed direction in the world (world +z, SUN_ELEV up): turn away and it slides off
-function sunCam() { return dirCam(0, Math.sin(SUN_ELEV), Math.cos(SUN_ELEV)); }
+// The sun is a fixed point in the world: turn away and it slides off; fly past and it's behind you
+function sunCam() { return toCam(SUN_X, SUN_Y, SUN_Z); }
 
 // 1 with the sun dead centre, falling to 0 at AIM_CONE off-centre
 function sunAimNow() {
@@ -1460,7 +1646,7 @@ function drawBody(now) {
 // Hard turns and dives shed a few feathers off the hands
 function spawnFeathers(dt) {
   if (!handPtsScreen.length || feathers.length >= FEATHER_CAP) return;
-  const rate = Math.max(0, Math.abs(yawRate) - 0.5) * 4 + thrustEff * 2;
+  const rate = Math.max(0, Math.abs(yawRate) - 0.5) * 4 + thrustEff * 2 + barrelNow() * 10;
   if (Math.random() >= rate * dt) return;
   const p = handPtsScreen[(Math.random() * handPtsScreen.length) | 0];
   feathers.push({
@@ -1594,12 +1780,9 @@ function drawGhosts() {
 }
 
 // ---------- The father: a tiny wire figure on the ground; shrinks as you climb ----------
-function drawFather() {
-  const sky = clamp((viewAlt - SEA_LINE) / (1 - SEA_LINE), 0, 1);
-  const sc = mode === "melt" ? 1 : lerp(1, 0.4, sky);
-  const rx = view.hz, rz = -view.hx, fx = father.x, fz = father.z;
-  const d = Math.hypot(fx - view.x, fz - travel);
-  const b = 0.35 + 0.6 * depthB(d, VIEW_FAR * 1.5);
+// A standing wire figure on the ground at (fx, fz), facing you, scaled by sc
+function drawStanding(fx, fz, sc, b) {
+  const rx = view.hz, rz = -view.hx;
   const L = (u1, v1, u2, v2) => seg3(fx + rx * u1 * sc, v1 * sc, fz + rz * u1 * sc, fx + rx * u2 * sc, v2 * sc, fz + rz * u2 * sc, b);
   for (let i = 0; i < 6; i++) {                     // head, tipped back a little: looking up
     const a1 = (i / 6) * Math.PI * 2, a2 = ((i + 1) / 6) * Math.PI * 2;
@@ -1608,6 +1791,15 @@ function drawFather() {
   L(0, 0.9, 0, 0.5);                                 // body
   L(0, 0.82, -0.18, 0.58); L(0, 0.82, 0.18, 0.58);   // arms at his sides
   L(0, 0.5, -0.1, 0); L(0, 0.5, 0.1, 0);             // legs
+}
+
+function drawFather() {
+  const sky = clamp((viewAlt - SEA_LINE) / (1 - SEA_LINE), 0, 1);
+  const sc = mode === "melt" ? 1 : lerp(1, 0.4, sky);
+  const fx = father.x, fz = father.z;
+  const d = Math.hypot(fx - view.x, fz - travel);
+  const b = 0.35 + 0.6 * depthB(d, VIEW_FAR * 1.5);
+  drawStanding(fx, fz, sc, b);
   if (mode === "melt") {                             // standing on a rock in the sea
     const rock = [];
     for (let i = 0; i <= 9; i++) {
@@ -1678,7 +1870,7 @@ const passed = (o, behind, wide) => fwdOf(o.x, o.z) < behind || Math.abs(latOf(o
 // ---------- Mountains: jagged ridges at the sides ----------
 function drawMountains() {
   for (const m of mountains) {
-    if (passed(m, 0.5, 45)) spawnMountain(m, VIEW_FAR * (0.8 + 0.3 * Math.random()));
+    respawn(m, spawnMountain, 0.5, 60);
     const b = sceneryB(distOf(m)), P = m.prof;
     const at = i => [m.x + m.ax * P[i][0] * m.w, P[i][1] * m.h, m.z + m.az * P[i][0] * m.w];
     for (let i = 1; i < P.length; i++) {
@@ -1691,7 +1883,7 @@ function drawMountains() {
 // ---------- Towers: tapering lattice with rings, braces and an antenna ----------
 function drawTowers() {
   for (const t of towers) {
-    if (passed(t, -0.5, 30)) spawnTower(t, VIEW_FAR * (0.6 + 0.4 * Math.random()));
+    respawn(t, spawnTower, -0.5, 45);
     const b = sceneryB(distOf(t));
     const ring = (y, w) => [[t.x - w, y, t.z - w], [t.x + w, y, t.z - w], [t.x + w, y, t.z + w], [t.x - w, y, t.z + w]];
     let prev = ring(0, 0.3);
@@ -1712,7 +1904,7 @@ function drawTowers() {
 // ---------- Clouds: eye-level outlines that part around the camera ----------
 function drawClouds() {
   for (const c of cloudShapes) {
-    if (passed(c, 0.3, 30)) spawnCloud(c, VIEW_FAR * (0.7 + 0.3 * Math.random()));
+    respawn(c, spawnCloud, 0.3, 40);
     const d = Math.max(0, fwdOf(c.x, c.z)), n = c.pts.length, y = view.h + c.yRel;
     const b = 0.85 * depthB(d, VIEW_FAR) * clamp((VIEW_FAR - d) / 4, 0, 1);
     const split = d < CLOUD_SPLIT ? 3.5 * Math.pow(1 - d / CLOUD_SPLIT, 1.5) : 0;
@@ -1731,7 +1923,7 @@ function drawClouds() {
 
 // ---------- Speed lines: red streaks rushing past once you're flying fast ----------
 function drawSpeedLines() {
-  const show = clamp((fwdSpeed - 6) / 6 + Math.max(0, thrustEff), 0, 1);   // surge under thrust
+  const show = clamp((fwdSpeed - 6) / 6 + Math.max(0, thrustEff) + barrelNow() * 0.6, 0, 1);   // surge under thrust / a roll
   const len = fwdSpeed * (0.07 + 0.05 * Math.max(0, thrustEff));
   for (const p of speedLines) {
     if (passed(p, 0.3, 8)) spawnSpeed(p, 14 + Math.random() * 8);
@@ -1741,6 +1933,122 @@ function drawSpeedLines() {
   }
 }
 
+// ---------- The far skyline: a jagged range all round, fixed by world bearing ----------
+function drawRidge() {
+  const half = 1.5;                                   // radians each side of the heading
+  const hAt = a => 2.5 + 2.2 * Math.abs(Math.sin(a * 3 + RIDGE_SEED)) + 1.6 * Math.sin(a * 7.3 + RIDGE_SEED * 2)
+                 + 0.9 * Math.sin(a * 17 + RIDGE_SEED * 3) + 0.5 * Math.sin(a * 41);
+  let px = 0, py = 0, pz = 0, has = false;
+  for (let i = 0; i <= RIDGE_N; i++) {
+    const a = view.yaw - half + (i / RIDGE_N) * half * 2;
+    const x = view.x + Math.sin(a) * RIDGE_D, z = travel + Math.cos(a) * RIDGE_D, y = Math.max(0, hAt(a));
+    if (has) seg3(px, py, pz, x, y, z, 0.2);
+    px = x; py = y; pz = z; has = true;
+  }
+}
+
+// ---------- Ruins: rows of columns, some broken, a lintel over the whole ones ----------
+function drawColumns() {
+  for (const c of columns) {
+    respawn(c, spawnColumns, 0, 40);
+    const b = sceneryB(distOf(c));
+    if (b <= 0.02) continue;
+    const ax = c.ax, az = c.az, w = 0.13;
+    let prevTop = null;
+    for (let i = 0; i < c.n; i++) {
+      const u = i * c.gap, h = c.h * c.cols[i], whole = c.cols[i] === 1;
+      const x = c.x + ax * u, z = c.z + az * u;
+      // two shaft lines (seen edge-on either side), base and cap squares
+      seg3(x + ax * w, 0, z + az * w, x + ax * w, h, z + az * w, b);
+      seg3(x - ax * w, 0, z - az * w, x - ax * w, h, z - az * w, b);
+      const sq = (y, s) => {
+        const p = [[x + ax * s + az * s, y, z + az * s - ax * s], [x - ax * s + az * s, y, z + az * s + ax * s],
+                   [x - ax * s - az * s, y, z - az * s + ax * s], [x + ax * s - az * s, y, z - az * s - ax * s]];
+        for (let k = 0; k < 4; k++) { const p1 = p[k], p2 = p[(k + 1) % 4]; seg3(p1[0], p1[1], p1[2], p2[0], p2[1], p2[2], b * 0.8); }
+      };
+      sq(0.08, 0.24);
+      if (whole) sq(h, 0.22);
+      else {                                          // broken: a jagged top
+        seg3(x - ax * w, h, z - az * w, x, h + 0.18, z, b); seg3(x, h + 0.18, z, x + ax * w, h - 0.05, z + az * w, b);
+      }
+      if (whole && prevTop) seg3(prevTop[0], c.h + 0.12, prevTop[1], x, c.h + 0.12, z, b);   // lintel
+      prevTop = whole ? [x, z] : null;
+    }
+  }
+}
+
+// ---------- Labyrinth: low maze walls on the ground, drawn as top edge + posts ----------
+function drawMaze() {
+  for (const m of mazes) {
+    respawn(m, spawnMaze, -2, 36);
+    const b = sceneryB(distOf(m)) * 0.9;
+    if (b <= 0.02) continue;
+    for (const [x1, z1, x2, z2] of m.walls) {
+      const ax = m.x + x1, az = m.z + z1, bx = m.x + x2, bz = m.z + z2;
+      seg3(ax, m.h, az, bx, m.h, bz, b);              // top edge
+      seg3(ax, 0, az, ax, m.h, az, b * 0.7);          // post
+      seg3(bx, 0, bz, bx, m.h, bz, b * 0.7);
+    }
+  }
+}
+
+// ---------- Rings in the air: fly through one and it rings ----------
+function drawRings(now) {
+  for (const r of rings) {
+    respawn(r, spawnRing, -1, 30);
+    const f = fwdOf(r.x, r.z);
+    // crossing its plane, inside its radius → hit
+    if (mode === "live" && r.prevFwd > 0 && f <= 0 && Math.abs(latOf(r.x, r.z)) < r.r && Math.abs(view.h - r.y) < r.r) {
+      r.hit = now; ringChime();
+      for (let k = 0; k < 12 && feathers.length < FEATHER_CAP; k++) {
+        feathers.push({ x: W / 2 + (Math.random() - 0.5) * W * 0.6, y: H / 2 + (Math.random() - 0.5) * H * 0.6,
+                        vx: (Math.random() - 0.5) * 120, vy: -60 + Math.random() * 40,
+                        ph: Math.random() * 6.28, life: 0, max: 1.2 + Math.random(), size: 1.8 + Math.random() });
+      }
+    }
+    r.prevFwd = f;
+    const flash = clamp(1 - (now - r.hit) / 600, 0, 1);
+    const b = Math.min(1, sceneryB(distOf(r)) * (0.9 + 0.6 * flash) + flash * 0.3);
+    if (b <= 0.02) continue;
+    const n = 14, pts = [];
+    for (let i = 0; i < n; i++) {
+      const a = (i / n) * Math.PI * 2, s = r.r * (1 + flash * 0.15);
+      pts.push([r.x + r.ax * Math.cos(a) * s, r.y + Math.sin(a) * s, r.z + r.az * Math.cos(a) * s]);
+    }
+    for (let i = 0; i < n; i++) { const p = pts[i], q = pts[(i + 1) % n]; seg3(p[0], p[1], p[2], q[0], q[1], q[2], b); }
+  }
+}
+
+// ---------- Giant feathers, turning as they drift down ----------
+function drawBigFeathers(now, dt) {
+  const t = now / 1000;
+  for (const f of bigFeathers) {
+    if (mode === "live" || mode === "results") { f.y += f.vy * dt; f.ang += f.spin * dt; }
+    if (f.y < -1 || fwdOf(f.x, f.z) < -3 || Math.abs(latOf(f.x, f.z)) > 40) spawnBigFeather(f, 10 + Math.random() * 40);
+    const b = sceneryB(distOf(f)) * 0.9;
+    if (b <= 0.02) continue;
+    const rx = view.hz, rz = -view.hx;                // billboard plane: your right vector + up
+    const ang = f.ang + Math.sin(t * 0.7 + f.sway) * 0.3;
+    const ca = Math.cos(ang), sa = Math.sin(ang), L = f.len;
+    const P = (u, v) => [f.x + rx * (u * ca - v * sa), f.y + (u * sa + v * ca), f.z + rz * (u * ca - v * sa)];
+    const tip = P(L / 2, 0), base = P(-L / 2, 0);
+    seg3(base[0], base[1], base[2], tip[0], tip[1], tip[2], b);          // the shaft
+    for (let i = 1; i <= 5; i++) {                                        // barbs, both sides
+      const u = -L / 2 + (i / 6) * L, w = L * 0.18 * Math.sin((i / 6) * Math.PI);
+      const o = P(u, 0), p1 = P(u + L * 0.08, w), p2 = P(u + L * 0.08, -w);
+      seg3(o[0], o[1], o[2], p1[0], p1[1], p1[2], b * 0.8);
+      seg3(o[0], o[1], o[2], p2[0], p2[1], p2[2], b * 0.8);
+    }
+  }
+}
+
+// ---------- The colossus ----------
+function drawColossus() {
+  respawn(colossus, spawnColossus, -2, 50);
+  const b = sceneryB(distOf(colossus)) * 0.7;
+  if (b > 0.02) drawStanding(colossus.x, colossus.z, COLOSSUS_SCALE, b);
+}
+
 // The whole world, in one batched stroke pass, then scanlines
 function drawWorld(now, dt, sun) {
   beginWire();
@@ -1748,9 +2056,15 @@ function drawWorld(now, dt, sun) {
   const fallT = mode === "melt" ? (now - meltStart) / 1000 : -1;
   const land = fallT < FALL_UP * 0.8;
   if (land) {
+    drawRidge();
     drawGround();
+    drawMaze();
     drawMountains();
+    drawColumns();
     drawTowers();
+    drawColossus();
+    drawRings(now);
+    drawBigFeathers(now, dt);
     drawClouds();
     drawSpeedLines();
   }
@@ -1903,6 +2217,12 @@ $("again").onclick = () => {
   altitude = 0; altVel = 0; heat = 0; seaSince = 0;
   wax = []; feathers = []; figures = []; visorDrops = []; frags = []; burnt.clear();
   lie = null; lieTextUntil = 0; tilt = null;
+  barrel = null; barrelCool = 0; rollHist.length = 0;
+  // Back to the start, facing the sun; the world is laid out fresh ahead
+  view.x = 0; travel = 0; view.yaw = 0; view.hx = 0; view.hz = 1; view.cy = 1; view.sy = 0;
+  view.h = CAM_H_SEA; view.pitch = 0; bank = 0; yawRate = 0; fwdSpeed = SPEED_BASE;
+  father.x = 0; father.z = FATHER_AHEAD;
+  respawnAll();
   recalibrate();                      // "level" = however the phone is held when you tap
   releaseVoice();                     // drop any leftover melt automation
   mode = "live";
