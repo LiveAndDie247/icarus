@@ -4,56 +4,119 @@
 <meta charset="UTF-8">
 <meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
 <meta name="theme-color" content="#000000">
-<title>Icarus</title>
+<title>ICARUS — LIVE.AND.DIE</title>
+<meta name="description" content="ICARUS by LIVE.AND.DIE. Tilt your phone to fly a night highway toward the sun. Get close. Burn. Fall. The Oracle tells you one truth per flight. Results not guaranteed. Truth subject to availability.">
+<meta property="og:type" content="website">
+<meta property="og:site_name" content="LIVE.AND.DIE">
+<meta property="og:title" content="ICARUS — THE ORACLE">
+<meta property="og:description" content="Fly the highway to the sun. Melt. Fall. Learn one truth. Collect all 34. Terms apply.">
+<meta property="og:url" content="https://liveanddie247.github.io/icarus/">
+<meta property="og:image" content="https://liveanddie247.github.io/icarus/og.png">
+<meta property="og:image:width" content="1200">
+<meta property="og:image:height" content="630">
+<meta name="twitter:card" content="summary_large_image">
+<meta name="twitter:image" content="https://liveanddie247.github.io/icarus/og.png">
 <style>
+  /* LIVE.AND.DIE skin: the site's palette, Times + Courier, double red borders, the inv blink */
+  :root { --r: #ff0000; --r2: #aa0000; --r3: #4a0000; --b: #3a3aff; --b2: #2222cc; --b3: #101060;
+          --sf: "Times New Roman", Times, "Liberation Serif", serif; --tt: "Courier New", Courier, monospace; }
   * { box-sizing: border-box; margin: 0; padding: 0; }
   html, body {
-    height: 100%; background: #000; color: #fff; overflow: hidden;
-    font-family: system-ui, -apple-system, "Segoe UI", Roboto, sans-serif;
+    height: 100%; background: #000; color: var(--b); overflow: hidden;
+    font-family: var(--sf);
     touch-action: manipulation; user-select: none; -webkit-user-select: none;
   }
+  [hidden] { display: none !important; }
   /* Canvas fills the screen; its resolution follows the screen's aspect (see fit()) */
   canvas { display: block; position: fixed; inset: 0; width: 100%; height: 100%; }
+  @keyframes inv { 0%, 49% { background: var(--r); color: #000 } 50%, 100% { background: var(--b); color: #000 } }
+  @keyframes blink { 0%, 49% { opacity: 1 } 50%, 100% { opacity: 0 } }
+  .ol { text-shadow: 1px 0 #000, -1px 0 #000, 0 1px #000, 0 -1px #000, 2px 2px 0 #000; }
 
   .screen {
     position: fixed; inset: 0; display: flex; flex-direction: column;
-    align-items: center; justify-content: center; gap: 22px;
+    align-items: center; justify-content: center; gap: 14px; padding: 16px; text-align: center;
   }
   .hidden { display: none; }
-  #results { background: rgba(0, 0, 0, .72); }
-
-  /* One pixel box, red on black */
-  button {
-    font: 700 22px "Courier New", Courier, monospace; letter-spacing: .25em; text-transform: uppercase;
-    color: #f00; background: #000; border: 4px solid #f00; border-radius: 0;
-    padding: 20px 46px; min-width: 240px; cursor: pointer;
-    box-shadow: 0 0 0 4px #000, 0 0 0 6px #f00, 0 0 26px rgba(255, 0, 0, .35);
-    text-shadow: 0 0 8px rgba(255, 0, 0, .7);
-    image-rendering: pixelated;
+  #intro { background: rgba(0, 0, 0, .55); }
+  .corp { font: 10px var(--tt); color: var(--r2); letter-spacing: .3em; text-transform: uppercase; }
+  .title {
+    font: italic 700 clamp(56px, 15vmin, 120px)/.9 var(--sf); color: var(--r); letter-spacing: .02em;
+    text-shadow: 2px 0 #000, -2px 0 #000, 0 2px #000, 0 -2px #000, 6px 6px 0 var(--b);
   }
-  button:active { background: #f00; color: #000; }
-  button:disabled { opacity: .45; }
+  .tag { font: italic 15px var(--sf); color: var(--b); max-width: 34em; }
+  .tag b { color: var(--r); font-style: normal; }
 
-  .home { font: 700 13px "Courier New", Courier, monospace; color: #f00; letter-spacing: .1em; padding: 12px 16px; text-decoration: underline; }
-  .home:active { background: #f00; color: #000; }
-  #flew { font: 300 64px "Courier New", Courier, monospace; color: #f00; letter-spacing: .06em; font-variant-numeric: tabular-nums; text-shadow: 0 0 12px rgba(255, 0, 0, .6); }
+  button {
+    font: italic 700 22px var(--sf); color: var(--r); background: #000; letter-spacing: .04em;
+    border: 3px double var(--r); outline: 1px solid var(--r3); outline-offset: 3px; border-radius: 0;
+    min-height: 52px; padding: 8px 34px; min-width: 220px; cursor: pointer; text-transform: uppercase;
+    text-shadow: 1px 1px 0 #000, 2px 2px 0 var(--r3);
+  }
+  button:active, button:hover { background: var(--r); color: #000; text-shadow: none; }
+  button:disabled { animation: inv .6s steps(1) infinite; color: #000; text-shadow: none; }
+  button.cell {
+    font: 700 11px var(--tt); letter-spacing: .2em; color: var(--b); border: 1px solid var(--b3);
+    outline: 0; min-height: 40px; min-width: 0; padding: 6px 14px; text-shadow: none; font-style: normal;
+  }
+  button.cell:active, button.cell:hover { background: var(--b); color: #000; }
+  .row { display: flex; gap: 8px; flex-wrap: wrap; justify-content: center; }
+
+  /* After a flight: the Oracle is on the canvas; only the buttons sit under it */
+  #results { justify-content: flex-end; padding-bottom: 18px; pointer-events: none; gap: 10px; }
+  #results > * { pointer-events: auto; }
+  #flew { font: 10px var(--tt); color: var(--r2); letter-spacing: .2em; text-transform: uppercase; }
+
+  .home { font: 700 12px var(--tt); color: var(--r); letter-spacing: .1em; padding: 10px 14px; text-decoration: underline; }
+  .home:active, .home:hover { background: var(--b); color: #000; text-decoration: none; }
+
+  /* TRUTHS: a table in the site's style */
+  #truthsPage { background: #000; overflow-y: auto; justify-content: flex-start; padding-top: 28px; }
+  #truthsPage .list { width: min(560px, 100%); border: 3px double var(--r); outline: 1px solid var(--r3); outline-offset: 3px; padding: 14px; }
+  #truthsPage h2 { font: italic 700 40px var(--sf); color: var(--r); text-shadow: 2px 0 #000, -2px 0 #000, 0 2px #000, 0 -2px #000, 4px 4px 0 var(--b); margin: 4px 0 2px; }
+  #truthsCount { font: 10px var(--tt); color: var(--r2); letter-spacing: .2em; margin-bottom: 10px; }
+  #truthsTable { width: 100%; border-collapse: collapse; text-align: left; }
+  #truthsTable td { border: 1px solid var(--b3); padding: 6px 8px; font: italic 15px var(--sf); color: var(--b); }
+  #truthsTable td:first-child { font: 10px var(--tt); color: var(--r2); width: 3.5em; font-style: normal; }
+  #truthsTable tr.unk td:last-child { color: var(--b3); font-style: normal; letter-spacing: -.05em; }
+  #truthsTable tr.deep td:first-child { color: var(--r); }
 </style>
 </head>
 <body>
 
 <canvas id="canvas" width="720" height="1280"></canvas>
 
-<!-- First screen: one button. It unlocks audio, asks for motion access and sets "level". -->
+<!-- First screen. Reach up unlocks audio + speech, asks for motion access and sets "level". -->
 <div id="intro" class="screen">
+  <div class="corp">LIVE.AND.DIE · flight division · est. never</div>
+  <h1 class="title">ICARUS</h1>
+  <div class="tag">tilt to climb. roll to turn. fly the highway to the sun.<br><b>get close. burn. fall.</b> the oracle is waiting at the bottom.</div>
   <button id="reach">Reach up</button>
+  <button id="truthsBtn" class="cell">TRUTHS</button>
   <a class="home" href="https://liveanddie.xyz/">← liveanddie.xyz</a>
 </div>
 
-<!-- After a flight: duration and Fly again. Nothing else. -->
+<!-- After a flight: the Oracle speaks on the canvas; these sit under it -->
 <div id="results" class="screen hidden">
-  <div id="flew">0.0s</div>
   <button id="again">Fly again</button>
+  <div class="row">
+    <button id="voiceBtn" class="cell">VOICE: ON</button>
+    <button id="saveClip" class="cell" hidden>SAVE CLIP</button>
+    <button id="truthsBtn2" class="cell">TRUTHS</button>
+  </div>
+  <div id="flew"></div>
   <a class="home" href="https://liveanddie.xyz/">← liveanddie.xyz</a>
+</div>
+
+<!-- Learned truths; the rest blacked out -->
+<div id="truthsPage" class="screen" hidden>
+  <div class="list">
+    <div class="corp">LIVE.AND.DIE · oracle records</div>
+    <h2>TRUTHS</h2>
+    <div id="truthsCount"></div>
+    <table id="truthsTable"></table>
+  </div>
+  <button id="truthsClose" class="cell">CLOSE</button>
 </div>
 
 <script type="module">
@@ -124,10 +187,8 @@ const AIM_CONE = 30 * Math.PI / 180;  // how centred the sun is (drives the shim
 const CORONA_N = 48;                  // flame tongues round the limb
 const GRID = 2, GRID_LINES = 28;      // ground grid spacing, lines per axis
 const VIEW_FAR = 56;                  // depth-fade distance
-const MOUNTAIN_N = 14, TOWER_N = 8, CLOUD_N = 6, SPEED_N = 50;
-const COLUMN_N = 5, MAZE_N = 5, RING_N = 6, BIGF_N = 3;   // ruins, labyrinth walls, rings in the air, giant feathers
+const CLOUD_N = 6, SPEED_N = 50;
 const RIDGE_D = 50, RIDGE_N = 96;     // far skyline: distance, segments all the way round
-const COLOSSUS_SCALE = 9;             // one giant figure standing far off
 
 // Barrel rolls: a hard sideways flick of the phone (or a double-tap on one half of the screen; Q/E on a keyboard)
 const BARREL_TIME = 0.95;             // seconds for the full 360
@@ -213,6 +274,43 @@ const FEATHER_CAP = 50;
 const WAX_CAP = 110;
 const WAX_COLORS = ["rgb(255, 70, 30)", "rgb(255, 105, 40)", "rgb(235, 45, 25)", "rgb(255, 135, 60)"];
 
+// ---------- v3: the highway (all in world units) ----------
+const BLUE = "rgb(58, 58, 255)";      // the site's --b
+const SF = '"Times New Roman", Times, "Liberation Serif", serif';
+const HWY_SPACING = 48;               // parallel highways every this far across x: wherever you turn, there's a road
+const HWY_HALF = 3.2, DASH = 2;       // road half-width, centre-line dash length
+const POLE_GAP = 7, POLE_X = 6.4, POLE_H = 3.4, ARM = 0.75, WIRE_SAG = 0.5;   // telephone poles + wires
+const OVERPASS_GAP = 120, OVERPASS_AT = 70;
+const CAR_N = 6, BILL_N = 6, MOTEL_N = 2, GAS_N = 2;
+// The site's own classifieds, [big, small]
+const ADS = [
+  ["HOT SINGLES IN YOUR AREA", "they have been waiting since 2007."], ["WE BUY TEETH", "top dollar. bring your own."],
+  ["BAIL BONDS — 24 HRS", "we come to you."], ["JESUS SAVES", "terms apply."], ["COMBO #4", "burger, fries, dissociative. $6.99"],
+  ["NO CREDIT CHECK", "cash today. 2,000% APR."], ["ANGEL DUST® — FAMILY SIZE", "operators are standing by."],
+  ["YOUR CHILDHOOD — RESTOCKED", "while supplies last."], ["ASK YOUR DOCTOR", "if it is right for you."],
+  ["SCRATCH & WIN", "everyone is a winner."], ["YOU ARE THE 1,000,000TH VISITOR", "you have won a feeling."],
+  ["FREEDOM™ — NOW IN RED", "zero down. zero APR. zero."], ["ACID BY THE SHEET", "buy 9, get the 10th free."],
+  ["THIS SPACE FOR RENT", "high traffic. low feelings."], ["REVISIT KIT: ONE TUESDAY, 2007", "relive it. again. again."],
+  ["YOUR COMPUTER MAY BE INFECTED", "with a feeling. tap to remove."], ["HE VOTED AGAINST YOUR FEELINGS", "paid for by Americans for America."],
+  ["XXX ¤ LIVE ¤ UNCENSORED", "must be 18+. must be something."],
+];
+// ...until they start talking about you
+const YOU_ADS = [
+  ["WE SEE YOU", "you are flying too high."], ["YOU LOOK TIRED", "have you tried landing?"], ["TURN BACK", "this is your last exit."],
+  ["YOU ARE ALREADY HERE", "next exit: you."], ["WE BUY WINGS", "any condition. cash."], ["SMILE", "the sun is watching."],
+  ["YOUR FATHER CALLED", "he says come down."], ["HOT SUN IN YOUR AREA", "it has been waiting for you."],
+];
+const WEIRD_FROM = 0.45, WEIRD_FULL = 0.78;   // altitude where the world starts getting strange / is fully strange
+const MELT_ADS = 0.82;                // altitude where the ads melt
+const DRIP_CAP = 140, EDGE_CAP = 60;  // sun drips, wing-wax drips from the frame edges
+// ---------- v3: the Oracle ----------
+const TRUTH_KEY = "icarus.truths.v1", VOICE_KEY = "icarus.voice.v1";
+const ORACLE_DARK = 1.6;              // seconds of black and quiet after the water
+const ORACLE_RISE = 3.4;              // seconds for the 8-ball to rise
+const LETTER_MS = 75;                 // the truth fades on, letter by letter
+const DEEP_HEAT = 0.9;                // max heat a flight needs for a deep truth
+const CLIP_TAIL = 3;                  // seconds the clip holds on the truth once it's complete
+
 // ============================================================
 // DOM + state
 // ============================================================
@@ -235,7 +333,7 @@ addEventListener("resize", fit);
 if (screen.orientation) screen.orientation.addEventListener("change", fit);
 let audio = null;
 
-let mode = "intro";           // intro | live | melt | results
+let mode = "intro";           // intro | live | melt | oracle
 let altitude = 0;             // 0..1, a physics value driven by the phone's pitch
 let altVel = 0;               // altitude units / s
 let heat = 0;                 // 0..1
@@ -293,17 +391,27 @@ const burnt = new Set();              // flesh segment ids already burnt off (so
 let frags = [];                       // burnt flesh falling away: { cx, cy, hx, hy, vx, vy, spin, life, max }
 let rain = [];                        // Greek rain columns
 
-// Wire scenery in world coordinates (spawned ahead along the current heading)
-const mountains = Array.from({ length: MOUNTAIN_N }, () => spawnMountain({}, 6 + Math.random() * 48));
-const towers = Array.from({ length: TOWER_N }, () => spawnTower({}, 4 + Math.random() * 46));
+// Wire scenery in world coordinates (spawned ahead along the current heading; recycled as it passes)
 const cloudShapes = Array.from({ length: CLOUD_N }, (_, i) => spawnCloud({}, 8 + i * 8 + Math.random() * 4));
 const speedLines = Array.from({ length: SPEED_N }, () => spawnSpeed({}, 1 + Math.random() * 20));
-const columns = Array.from({ length: COLUMN_N }, () => spawnColumns({}, 6 + Math.random() * 46));
-const mazes = Array.from({ length: MAZE_N }, () => spawnMaze({}, 6 + Math.random() * 46));
-const rings = Array.from({ length: RING_N }, () => spawnRing({}, 8 + Math.random() * 44));
-const bigFeathers = Array.from({ length: BIGF_N }, () => spawnBigFeather({}, 10 + Math.random() * 40));
-const colossus = spawnColossus({}, 30 + Math.random() * 20);
+const billboards = Array.from({ length: BILL_N }, (_, i) => spawnBillboard({}, 8 + i * 8 + Math.random() * 4));
+const motels = Array.from({ length: MOTEL_N }, () => spawnMotel({}, 10 + Math.random() * 40));
+const gasStations = Array.from({ length: GAS_N }, () => spawnGas({}, 14 + Math.random() * 36));
+// Cars on the nearest highway: lane offset from its centre, z, speed (+ = your way, red tail lights; − = oncoming, blue)
+const cars = Array.from({ length: CAR_N }, (_, i) => {
+  const away = i % 2 === 0;
+  return { lane: away ? 1.6 : -1.6, z: (Math.random() - 0.3) * VIEW_FAR, v: away ? 5 + Math.random() * 4 : -(7 + Math.random() * 5) };
+});
 const RIDGE_SEED = Math.random() * 100;
+let signText = [];                    // sign faces queued during the wire pass, lettered after it
+let sunDrips = [], edgeDrips = [];
+let neonNear = 0;                     // 0..1: how close the nearest neon sign is (its buzz)
+let dtWorld = 1 / 60;
+let oracle = null;                    // { start, truth, learned, total, hint, final, spoken, shown }
+let truthsData = null;                // truths.json
+let voiceOn = true;
+try { voiceOn = localStorage.getItem(VOICE_KEY) !== "0"; } catch (e) { /* private mode: default on */ }
+let recorder = null, recChunks = [], lastClip = null;
 
 let feathers = [], wax = [];
 
@@ -327,30 +435,6 @@ function place(o, ahead, lat) {
 function fwdOf(x, z) { return (x - view.x) * view.hx + (z - travel) * view.hz; }
 function latOf(x, z) { return (x - view.x) * view.hz - (z - travel) * view.hx; }
 
-// Jagged mountain ridge at the side, facing the heading it was spawned on:
-// profile of (u 0..1 across, h 0..1 up), laid out along (ax, az)
-function spawnMountain(m, ahead) {
-  m.w = 4 + Math.random() * 7;
-  m.h = 1.5 + Math.random() * 4.5;
-  m.ax = view.hz; m.az = -view.hx;
-  place(m, ahead, side() * (5 + Math.random() * 16) - m.w / 2);
-  const n = 7 + ((Math.random() * 5) | 0), peak = 1 + ((Math.random() * (n - 2)) | 0);
-  m.prof = [];
-  for (let i = 0; i <= n; i++) {
-    const h = i === 0 || i === n ? 0 : i === peak ? 1 : 0.25 + Math.random() * 0.6;
-    m.prof.push([i / n + (i && i < n ? (Math.random() - 0.5) * 0.5 / n : 0), h]);
-  }
-  return m;
-}
-
-// Lattice tower, some close enough to pass right beside you
-function spawnTower(t, ahead) {
-  place(t, ahead, side() * (1.5 + Math.random() * 9));
-  t.h = 2 + Math.random() * 3.5;
-  t.levels = 4 + ((Math.random() * 3) | 0);
-  return t;
-}
-
 // Jagged cloud outline at eye level (yRel = height relative to the camera), flattish bottom
 function spawnCloud(c, ahead) {
   place(c, ahead, (Math.random() - 0.5) * 5);
@@ -371,60 +455,39 @@ function spawnSpeed(p, ahead) {
   return p;
 }
 
-// Ruins: a row of fluted columns, some broken off, with a lintel across the whole ones
-function spawnColumns(c, ahead) {
-  c.ax = view.hz; c.az = -view.hx;                     // the row runs across the heading
-  c.n = 2 + ((Math.random() * 4) | 0);
-  c.h = 2 + Math.random() * 2.5;
-  c.gap = 0.9 + Math.random() * 0.4;
-  place(c, ahead, side() * (2 + Math.random() * 14) - (c.n * c.gap) / 2);
-  c.cols = Array.from({ length: c.n }, () => (Math.random() < 0.4 ? 0.3 + Math.random() * 0.45 : 1));   // 1 = whole
-  return c;
+// Billboards: a face across your heading, off to the side, selling the site's ads
+function pickAd(b) {
+  const you = Math.min(1, Math.max(0, (viewAlt - WEIRD_FROM) / (WEIRD_FULL - WEIRD_FROM)));   // higher: about you (no clamp: runs at init)
+  const list = Math.random() < you * 0.85 ? YOU_ADS : ADS;
+  b.ad = list[(Math.random() * list.length) | 0];
+  return b;
 }
-
-// Labyrinth: a fragment of Daedalus' maze, low walls along a random walk on the ground grid
-function spawnMaze(m, ahead) {
-  place(m, ahead, side() * (1 + Math.random() * 12));
-  m.x = Math.round(m.x / GRID) * GRID; m.z = Math.round(m.z / GRID) * GRID;   // snapped to the grid
-  m.h = 0.5 + Math.random() * 0.4;
-  m.walls = [];
-  let x = 0, z = 0, dir = (Math.random() * 4) | 0;
-  const steps = 4 + ((Math.random() * 5) | 0);
-  for (let i = 0; i < steps; i++) {
-    if (Math.random() < 0.6) dir = (dir + (Math.random() < 0.5 ? 1 : 3)) % 4;   // mostly turning
-    const dx = [1, 0, -1, 0][dir] * GRID, dz = [0, 1, 0, -1][dir] * GRID;
-    m.walls.push([x, z, x + dx, z + dz]);
-    x += dx; z += dz;
-  }
+function spawnBillboard(b, ahead) {
+  b.ax = view.hz; b.az = -view.hx;
+  b.w = 5.5 + Math.random() * 1.5; b.h = b.w * 0.42;   // the sign's own 400×168
+  b.leg = 2.2 + Math.random() * 1.6;
+  place(b, ahead, side() * (POLE_X + 2.5 + Math.random() * 10) - b.w / 2);
+  b.blue = Math.random() < 0.4;
+  b.seed = Math.random() * 1000;
+  b.reroll = 2 + Math.random() * 4;
+  return pickAd(b);
+}
+// Motel sign on a tall pole, with an arrow
+function spawnMotel(m, ahead) {
+  m.ax = view.hz; m.az = -view.hx;
+  place(m, ahead, side() * (POLE_X + 4 + Math.random() * 12));
+  m.h = 4.5 + Math.random() * 1.5;
+  m.vacancy = Math.random() < 0.6;
+  m.seed = Math.random() * 1000;
   return m;
 }
-
-// Rings in the air, facing the heading: fly through one for a chime
-function spawnRing(r, ahead) {
-  r.ax = view.hz; r.az = -view.hx;
-  place(r, ahead, (Math.random() - 0.5) * 8);
-  r.y = 0.9 + Math.random() * 3.4;                     // within reach of the camera's heights
-  r.r = 1.1 + Math.random() * 0.5;
-  r.prevFwd = fwdOf(r.x, r.z);
-  r.hit = -1e9;
-  return r;
-}
-
-// Giant feathers drifting down from somewhere above, turning slowly
-function spawnBigFeather(f, ahead) {
-  place(f, ahead, side() * (3 + Math.random() * 14));
-  f.y = view.h + 5 + Math.random() * 8;
-  f.vy = -(0.25 + Math.random() * 0.25);
-  f.len = 2 + Math.random() * 1.5;
-  f.ang = Math.random() * 6.28; f.spin = (Math.random() < 0.5 ? -1 : 1) * (0.2 + Math.random() * 0.3);
-  f.sway = Math.random() * 6.28;
-  return f;
-}
-
-// The colossus: one of the father's kind, but enormous, standing far off, facing nothing
-function spawnColossus(c, ahead) {
-  place(c, ahead, side() * (10 + Math.random() * 14));
-  return c;
+// Gas station canopy on four posts, with pumps
+function spawnGas(g, ahead) {
+  g.ax = view.hz; g.az = -view.hx;
+  g.w = 5 + Math.random() * 2; g.d = 3 + Math.random(); g.h = 2.4;
+  place(g, ahead, side() * (POLE_X + 3 + Math.random() * 9) - g.w / 2);
+  g.seed = Math.random() * 1000;
+  return g;
 }
 
 // Respawn an object that left the view: far ahead if it passed behind you, anywhere ahead if a
@@ -438,15 +501,13 @@ function respawn(o, fn, behind, wide) {
 // Everything, anywhere ahead (after the position resets on "Fly again")
 function respawnAll() {
   const any = () => 6 + Math.random() * (VIEW_FAR - 6);
-  for (const m of mountains) spawnMountain(m, any());
-  for (const t of towers) spawnTower(t, any());
   cloudShapes.forEach((c, i) => spawnCloud(c, 8 + i * 8 + Math.random() * 4));
   for (const p of speedLines) spawnSpeed(p, 1 + Math.random() * 20);
-  for (const c of columns) spawnColumns(c, any());
-  for (const m of mazes) spawnMaze(m, any());
-  for (const r of rings) spawnRing(r, any());
-  for (const f of bigFeathers) spawnBigFeather(f, 10 + Math.random() * 40);
-  spawnColossus(colossus, 30 + Math.random() * 20);
+  billboards.forEach((b, i) => spawnBillboard(b, 8 + i * 8 + Math.random() * 4));
+  for (const m of motels) spawnMotel(m, any());
+  for (const g of gasStations) spawnGas(g, any());
+  for (const c of cars) c.z = travel + (Math.random() - 0.3) * VIEW_FAR;
+  sunDrips = []; edgeDrips = []; signText = [];
 }
 
 // ---------- Camera projection ----------
@@ -578,22 +639,6 @@ function barrelWhoosh(T) {
   a.wobblePitch.gain.linearRampToValueAtTime(0, t + T);
 }
 
-// Flying through a ring: a bright chime at the octave, into the reverb
-function ringChime() {
-  if (!audio) return;
-  const a = audio, ac = a.ac, t = ac.currentTime;
-  const hz = Math.max(60, a.osc1.frequency.value) * 2;
-  for (const [mult, g0] of [[1, 0.18], [1.5, 0.07], [2, 0.05]]) {
-    const o = ac.createOscillator(), g = ac.createGain();
-    o.type = "sine"; o.frequency.value = hz * mult;
-    g.gain.setValueAtTime(0.0001, t);
-    g.gain.exponentialRampToValueAtTime(g0, t + 0.01);
-    g.gain.exponentialRampToValueAtTime(0.0001, t + 0.9);
-    o.connect(g); g.connect(a.master); g.connect(a.reverb);
-    o.start(t); o.stop(t + 1);
-  }
-}
-
 // ============================================================
 // Pitch: continuous, soft-snapped to a major pentatonic scale
 // ============================================================
@@ -660,6 +705,13 @@ function initAudio() {
     roar: ac.createBufferSource(), roarFilter: ac.createBiquadFilter(), roarGain: ac.createGain(),
     roarLfo: ac.createOscillator(), roarLfoDepth: ac.createGain(),
     rumble: ac.createOscillator(), rumble2: ac.createOscillator(), rumbleGain: ac.createGain(),
+    // v3 world: power-line hum (rises with altitude), the distant highway, neon buzz near the signs
+    hum1: ac.createOscillator(), hum2: ac.createOscillator(), humFilter: ac.createBiquadFilter(), humGain: ac.createGain(),
+    hwy: ac.createBufferSource(), hwyFilter: ac.createBiquadFilter(), hwyGain: ac.createGain(),
+    neon: ac.createOscillator(), neonFilter: ac.createBiquadFilter(), neonGain: ac.createGain(),
+    // The Oracle: a quiet sub-bass under the truth
+    oracle1: ac.createOscillator(), oracle2: ac.createOscillator(), oracleGain: ac.createGain(),
+    recDest: ac.createMediaStreamDestination(),   // the clip's soundtrack
   };
   const n = node;
 
@@ -747,8 +799,34 @@ function initAudio() {
   n.rumble.connect(n.rumbleGain); n.rumble2.connect(n.rumbleGain);
   n.rumbleGain.connect(n.master);
 
+  // Power lines: 60 Hz mains hum + its buzzy 120 Hz overtone, through a bandpass
+  n.hum1.type = "sawtooth"; n.hum1.frequency.value = 60;
+  n.hum2.type = "square"; n.hum2.frequency.value = 120;
+  n.humFilter.type = "bandpass"; n.humFilter.frequency.value = 180; n.humFilter.Q.value = 1.5;
+  n.humGain.gain.value = 0;
+  n.hum1.connect(n.humFilter); n.hum2.connect(n.humFilter);
+  n.humFilter.connect(n.humGain).connect(n.master);
+  // The highway: low rumbling noise, far off
+  n.hwy.buffer = noise; n.hwy.loop = true; n.hwy.playbackRate.value = 0.5;
+  n.hwyFilter.type = "lowpass"; n.hwyFilter.frequency.value = 220;
+  n.hwyGain.gain.value = 0;
+  n.hwy.connect(n.hwyFilter).connect(n.hwyGain).connect(n.master);
+  n.hwy.start();
+  // Neon: a thin 120 Hz buzz, high and narrow
+  n.neon.type = "square"; n.neon.frequency.value = 120;
+  n.neonFilter.type = "bandpass"; n.neonFilter.frequency.value = 2400; n.neonFilter.Q.value = 6;
+  n.neonGain.gain.value = 0;
+  n.neon.connect(n.neonFilter).connect(n.neonGain).connect(n.master);
+  // The Oracle's sub: E1 and a fifth above, very quiet, into the hall
+  n.oracle1.type = n.oracle2.type = "sine";
+  n.oracle1.frequency.value = 41.2; n.oracle2.frequency.value = 61.7;
+  n.oracleGain.gain.value = 0;
+  n.oracle1.connect(n.oracleGain); n.oracle2.connect(n.oracleGain);
+  n.oracleGain.connect(n.master); n.oracleGain.connect(n.hall);
+
   n.master.connect(n.comp);
   n.comp.connect(ac.destination);
+  n.comp.connect(n.recDest);
 
   // Modulation routing (cents added to every oscillator's detune)
   n.wobble.connect(n.wobblePitch).connect(n.pitchBus);
@@ -757,7 +835,8 @@ function initAudio() {
   for (const o of [n.osc1, n.osc2, n.sub, n.shim, n.drone1, n.drone2, n.sunV1, n.sunV2]) n.pitchBus.connect(o.detune);
 
   for (const o of [n.osc1, n.osc2, n.sub, n.shim, n.wobble, n.vib, n.engine,
-                   n.drone1, n.drone2, n.sunV1, n.sunV2, n.sunTrem, n.roarLfo, n.rumble, n.rumble2]) o.start();
+                   n.drone1, n.drone2, n.sunV1, n.sunV2, n.sunTrem, n.roarLfo, n.rumble, n.rumble2,
+                   n.hum1, n.hum2, n.neon, n.oracle1, n.oracle2]) o.start();
   setFreq(n, ac, ROOT_HZ, 0.01);
   return { ac, ...n };
 }
@@ -792,6 +871,7 @@ const voiceParams = a => [
   a.drone1.frequency, a.drone2.frequency, a.droneGain.gain,
   a.sunV1.frequency, a.sunV2.frequency, a.sunGain.gain, a.sunTremDepth.gain,
   a.roarGain.gain, a.roarFilter.frequency, a.roarLfoDepth.gain, a.rumbleGain.gain,
+  a.humGain.gain, a.hum1.frequency, a.hwyGain.gain, a.neonGain.gain, a.oracleGain.gain,
 ];
 // Before live control resumes (e.g. "Fly again"), clear any melt automation
 function releaseVoice() {
@@ -895,6 +975,13 @@ function updateVoice(handsVisible, dt = 1 / 60) {
   glide(a.engine.frequency, 38 + fwdSpeed * 4 + push * 30, 0.08);
   glide(a.engFilter.frequency, 250 + fwdSpeed * 60 + push * 900, 0.08);
   glide(a.engGain.gain, handsVisible ? 0.035 + push * 0.08 : 0, 0.1);
+
+  // The world: the power lines hum louder (and sour) as you climb, the highway fades below you,
+  // and each neon sign buzzes as you pass, cutting out now and then like the lettering
+  glide(a.humGain.gain, 0.012 + 0.07 * Math.pow(altitude, 1.4), 0.3);
+  glide(a.hum1.frequency, 60 * (1 + 0.04 * weirdNow()), 0.5);
+  glide(a.hwyGain.gain, 0.01 + 0.05 * (1 - altitude), 0.4);
+  glide(a.neonGain.gain, Math.random() < 0.06 ? 0 : neonNear * 0.03, 0.02);
 }
 
 // MELT: pitch falls 2.5 octaves over MELT_TIME while the volume collapses to
@@ -935,6 +1022,9 @@ function meltVoice() {
   // Engine dies with the melt: pitch sags, level collapses
   a.engine.frequency.exponentialRampToValueAtTime(25, t + T);
   a.engGain.gain.setTargetAtTime(0, t, T / 4);
+  a.humGain.gain.setTargetAtTime(0, t, 1.2);           // the world goes quiet behind you
+  a.hwyGain.gain.setTargetAtTime(0, t, 1.5);
+  a.neonGain.gain.setTargetAtTime(0, t, 0.3);
   // (the hall send stays open so the fall rings out in the big space)
 
   // The long fall: nothing but wind, rising in level and pitch all the way down
@@ -944,37 +1034,16 @@ function meltVoice() {
   a.windFilter.frequency.exponentialRampToValueAtTime(1600, t + FALL_TIME - 0.2);
 }
 
-// At the water: the wind cuts and the sea tone fades back in, quietly
-function seaReturn() {
+// At the water: everything cuts to black and quiet; then the Oracle's sub-bass rises with the ball
+function oracleAudio() {
+  if (!audio) return;
   const a = audio, ts = a.ac.currentTime;
   for (const p of voiceParams(a)) hold(p, ts);
-  a.windGain.gain.setTargetAtTime(0, ts, 0.04);
-  const hallNow = a.hallSend.gain.value;
-  a.osc1.frequency.setValueAtTime(ROOT_HZ, ts);
-  a.osc2.frequency.setValueAtTime(ROOT_HZ, ts);
-  a.sub.frequency.setValueAtTime(ROOT_HZ / 2, ts);
-  a.shim.frequency.setValueAtTime(ROOT_HZ * 2, ts);
-  a.drone1.frequency.setValueAtTime(ROOT_HZ / 2, ts);
-  a.drone2.frequency.setValueAtTime(ROOT_HZ / 4, ts);
-  a.sunV1.frequency.setValueAtTime(ROOT_HZ * 3, ts);
-  a.sunV2.frequency.setValueAtTime(ROOT_HZ * 3 * SUN_BEAT, ts);
-  a.droneGain.gain.setValueAtTime(0.35, ts);        // at sea, the father is strongest
-  a.sunGain.gain.setValueAtTime(0, ts);
-  a.roarGain.gain.setValueAtTime(0, ts); a.rumbleGain.gain.setValueAtTime(0, ts);
-  a.osc1.detune.setValueAtTime(4 - FATHER_PULL, ts);
-  a.osc2.detune.setValueAtTime(-4 - FATHER_PULL, ts);
-  a.shim.detune.setValueAtTime(2 - FATHER_PULL, ts);
-  a.filter.frequency.setValueAtTime(260, ts);
-  a.filter.Q.setValueAtTime(1.2, ts);
-  a.g2.gain.setValueAtTime(0.25, ts);
-  a.gSub.gain.setValueAtTime(0.5, ts);
-  a.wobblePitch.gain.setValueAtTime(14, ts);
-  a.wobbleFilter.gain.setValueAtTime(140, ts);
-  a.revSend.gain.setValueAtTime(0.4, ts);
-  a.hallSend.gain.setValueAtTime(hallNow, ts);    // big space stays open through the fall
-  a.hallSend.gain.linearRampToValueAtTime(0, ts + 1.5);
-  a.amp.gain.setValueAtTime(0.0006, ts);
-  a.amp.gain.exponentialRampToValueAtTime(SEA_AFTER_GAIN, ts + 2.0);
+  for (const g of [a.windGain, a.amp, a.engGain, a.droneGain, a.sunGain, a.roarGain, a.rumbleGain, a.humGain, a.hwyGain, a.neonGain])
+    g.gain.setTargetAtTime(0, ts, 0.05);
+  a.hallSend.gain.setTargetAtTime(0, ts, 0.8);
+  a.oracleGain.gain.setValueAtTime(0, ts + ORACLE_DARK);
+  a.oracleGain.gain.linearRampToValueAtTime(0.16, ts + ORACLE_DARK + ORACLE_RISE);
 }
 
 function silence() { glide(audio.amp.gain, 0, 0.15); }
@@ -1009,8 +1078,150 @@ function whisper() {
 // ============================================================
 // Flight lifecycle
 // ============================================================
+// ---------- The Oracle's truths: truths.json, shuffled without repeats ----------
+const FALLBACK = { truths: [{ id: "t01", text: "there is no end" }], deep: [], final: { id: "final", text: "ask again." } };
+async function loadTruths() {
+  if (truthsData) return truthsData;
+  try {
+    const r = await fetch("truths.json", { cache: "no-cache" });
+    const j = await r.json();
+    if (!Array.isArray(j.truths) || !j.truths.length) throw new Error("no truths");
+    truthsData = { truths: j.truths, deep: Array.isArray(j.deep) ? j.deep : [], final: j.final || FALLBACK.final };
+  } catch (e) { console.warn("Couldn't load truths.json", e); truthsData = FALLBACK; }
+  return truthsData;
+}
+// seen: this cycle's ids; ever: every id ever learned (for the TRUTHS page); cycles: times it went round
+function loadSeen() {
+  try {
+    const s = JSON.parse(localStorage.getItem(TRUTH_KEY) || "{}");
+    return { seen: Array.isArray(s.seen) ? s.seen : [], ever: Array.isArray(s.ever) ? s.ever : [], cycles: s.cycles | 0 };
+  } catch (e) { return { seen: [], ever: [], cycles: 0 }; }
+}
+function saveSeen(s) { try { localStorage.setItem(TRUTH_KEY, JSON.stringify(s)); } catch (e) { console.warn("Couldn't save truths", e); } }
+
+// One truth for this flight. Deep ones only if you got very close to the sun.
+function pickTruth(maxHeat) {
+  const d = truthsData || FALLBACK, s = loadSeen();
+  const all = [...d.truths, ...d.deep], total = all.length;
+  const ids = new Set(all.map(t => t.id));
+  s.seen = s.seen.filter(id => ids.has(id));
+  const fresh = list => list.filter(t => !s.seen.includes(t.id));
+  const normal = fresh(d.truths), deep = fresh(d.deep);
+  const any = l => l[(Math.random() * l.length) | 0];
+  let truth, hint = "";
+  if (!normal.length && !deep.length) {                     // all learned: the final one, then round again
+    s.seen = []; s.cycles++;
+    if (!s.ever.includes(d.final.id)) s.ever.push(d.final.id);
+    saveSeen(s);
+    return { truth: d.final, learned: total, total, hint: "", final: true };
+  }
+  const nearSun = maxHeat >= DEEP_HEAT;
+  if (nearSun && deep.length && (!normal.length || Math.random() < 0.5)) truth = any(deep);
+  else if (normal.length) truth = any(normal);
+  else {                                                     // only deep ones left, and you didn't get close enough
+    const seenList = all.filter(t => s.seen.includes(t.id));
+    return { truth: any(seenList.length ? seenList : d.truths), learned: s.seen.length, total, hint: "THE REST ARE CLOSER TO THE SUN", final: false, repeat: true };
+  }
+  s.seen.push(truth.id);
+  if (!s.ever.includes(truth.id)) s.ever.push(truth.id);
+  saveSeen(s);
+  return { truth, learned: s.seen.length, total, hint, final: false };
+}
+
+// ---------- The voice: speechSynthesis, low and slow, the most neutral voice there is ----------
+let ttsVoice = null;
+function pickVoice() {
+  if (!("speechSynthesis" in window)) return null;
+  const vs = speechSynthesis.getVoices();
+  if (!vs.length) return null;
+  const en = vs.filter(v => /^en(-|_|$)/i.test(v.lang));
+  const pool = en.length ? en : vs;
+  const pref = [/google us english/i, /samantha/i, /daniel/i, /alex/i, /microsoft (david|mark|zira)/i, /en-us/i];
+  for (const re of pref) { const v = pool.find(v => re.test(v.name) || re.test(v.lang)); if (v) return v; }
+  return pool.find(v => v.default) || pool[0];
+}
+if ("speechSynthesis" in window) speechSynthesis.onvoiceschanged = () => { ttsVoice = pickVoice(); };
+function speakTruth(text) {
+  if (!voiceOn || !("speechSynthesis" in window)) return;
+  try {
+    speechSynthesis.cancel();
+    const u = new SpeechSynthesisUtterance(text);
+    ttsVoice = ttsVoice || pickVoice();
+    if (ttsVoice) { u.voice = ttsVoice; u.lang = ttsVoice.lang; }
+    u.pitch = 0.6; u.rate = 0.8; u.volume = 1;
+    speechSynthesis.speak(u);
+  } catch (e) { console.warn("Speech failed", e); }
+}
+// Browsers only let speech start from a tap: say nothing, inside the tap, so later it's allowed
+function primeSpeech() {
+  if (!("speechSynthesis" in window)) return;
+  try { const u = new SpeechSynthesisUtterance(" "); u.volume = 0; speechSynthesis.speak(u); ttsVoice = pickVoice(); }
+  catch (e) { console.warn("Speech prime failed", e); }
+}
+
+// ---------- The clip: the canvas + the game's sound, from take-off to the truth on the 8-ball ----------
+// (speechSynthesis can't be captured by the page, so the truth is also written on the canvas)
+function startRecording() {
+  if (recorder || !audio || typeof MediaRecorder === "undefined" || !canvas.captureStream) return;
+  try {
+    const stream = canvas.captureStream(30);
+    for (const t of audio.recDest.stream.getAudioTracks()) stream.addTrack(t);
+    const types = ["video/mp4;codecs=avc1,mp4a", "video/mp4", "video/webm;codecs=vp9,opus", "video/webm;codecs=vp8,opus", "video/webm"];
+    const mimeType = types.find(t => MediaRecorder.isTypeSupported?.(t)) || "";
+    recorder = new MediaRecorder(stream, mimeType ? { mimeType, videoBitsPerSecond: 4e6 } : { videoBitsPerSecond: 4e6 });
+    recChunks = [];
+    recorder.ondataavailable = e => { if (e.data && e.data.size) recChunks.push(e.data); };
+    recorder.onstop = () => {
+      const type = recorder?.mimeType || mimeType || "video/webm";
+      lastClip = recChunks.length ? new Blob(recChunks, { type }) : null;
+      recChunks = []; recorder = null;
+      for (const t of stream.getVideoTracks()) t.stop();       // (the audio track belongs to the recDest: keep it)
+      if (lastClip) $("saveClip").hidden = false;
+    };
+    recorder.start(1000);
+  } catch (e) { console.warn("Recording failed", e); recorder = null; }
+}
+function stopRecording() { try { if (recorder && recorder.state !== "inactive") recorder.stop(); } catch (e) { recorder = null; } }
+async function saveClip() {
+  if (!lastClip) return;
+  const ext = lastClip.type.includes("mp4") ? "mp4" : "webm";
+  const file = new File([lastClip], `icarus-${Date.now()}.${ext}`, { type: lastClip.type });
+  try {
+    if (navigator.canShare?.({ files: [file] })) { await navigator.share({ files: [file], title: "ICARUS — LIVE.AND.DIE" }); return; }
+  } catch (e) { if (e.name === "AbortError") return; }
+  const url = URL.createObjectURL(file), a = document.createElement("a");
+  a.href = url; a.download = file.name; document.body.appendChild(a); a.click(); a.remove();
+  setTimeout(() => URL.revokeObjectURL(url), 4000);
+}
+
+// ---------- TRUTHS: what you've learned; the rest blacked out ----------
+async function showTruths() {
+  const d = await loadTruths(), s = loadSeen();
+  const rows = [...d.truths.map(t => [t, false]), ...d.deep.map(t => [t, true]), [d.final, false]];
+  const table = $("truthsTable");
+  table.textContent = "";
+  let known = 0;
+  rows.forEach(([t, deep], i) => {
+    const has = s.ever.includes(t.id);
+    if (has && t !== d.final) known++;
+    const tr = document.createElement("tr");
+    tr.className = (has ? "" : "unk") + (deep ? " deep" : "");
+    const n = document.createElement("td"), x = document.createElement("td");
+    n.textContent = t === d.final ? "∞" : (deep ? "D" : "") + String(i + 1 - (deep ? d.truths.length : 0)).padStart(2, "0");
+    x.textContent = has ? t.text : "█".repeat(Math.max(4, Math.round(t.text.length * 0.8)));
+    tr.append(n, x); table.append(tr);
+  });
+  $("truthsCount").textContent = `${known} OF ${d.truths.length + d.deep.length} LEARNED` + (s.cycles ? ` · CYCLE ${s.cycles + 1}` : "");
+  $("truthsPage").hidden = false;
+}
+
+// ============================================================
+// Flight lifecycle (cont.)
+// ============================================================
 function startFlight(now) {
-  flight = { start: now };
+  flight = { start: now, maxHeat: 0 };
+  lastClip = null; $("saveClip").hidden = true;
+  startRecording();
   flightOrigin = { x: view.x, z: travel, hx: view.hx, hz: view.hz };
   ghostPath = []; lastGhostRec = 0;
 }
@@ -1029,16 +1240,18 @@ function startMelt(now) {
   // (the hands now rise and cover the camera: see handPose)
 }
 
-// fromMelt: the wind cuts and the quiet sea tone plays under the results
-async function endFlight(flownMs, fromMelt = false) {
-  mode = "results";
-  if (fromMelt) seaReturn(); else silence();
+// The water: black, quiet, and then the Oracle rises
+function endFlight(flownMs) {
+  mode = "oracle";
+  const maxHeat = flight ? flight.maxHeat : 0;
   saveGhost(ghostPath);
   ghostPath = [];
   flight = null; flightOrigin = null;
   heat = 0; burnAmt = 0;
-  $("flew").textContent = (flownMs / 1000).toFixed(1) + "s";
-  $("results").classList.remove("hidden");
+  wax = []; feathers = []; embers = []; frags = []; visorDrops = []; sunDrips = []; edgeDrips = [];
+  oracle = { start: performance.now(), ...pickTruth(maxHeat), spoken: false, shown: false };
+  oracleAudio();
+  $("flew").textContent = `FLOWN ${(flownMs / 1000).toFixed(1)}S · HIGHEST HEAT ${Math.round(maxHeat * 100)}%`;
 }
 
 // ============================================================
@@ -1152,7 +1365,7 @@ function updateAltitude(dt) {
 // ============================================================
 function step(now, dt) {
   if (mode === "live") { readControls(now, dt); updateAltitude(dt); }
-  else if (mode === "results") { readControls(now, dt); thrustEff = 0; }
+  else if (mode === "oracle") { thrustEff = 0; }
 
   // Always flying forward along the heading: base speed, faster with altitude and when diving.
   // The melt keeps your momentum.
@@ -1188,6 +1401,7 @@ function step(now, dt) {
     heat += (near - heat) * (1 - Math.exp(-dt / (near > heat ? HEAT_RISE : HEAT_FALL)));
     if (near >= 1) heat = 1;
     burnAmt = heat * BURN_LIVE;
+    if (flight) flight.maxHeat = Math.max(flight.maxHeat, heat);
 
     if (!flight && altitude > SEA_LINE) { startFlight(now); seaSince = 0; }
 
@@ -1207,8 +1421,8 @@ function step(now, dt) {
     burnAmt = lerp(meltBurn0, 1.08, u * u * (3 - 2 * u));
     spawnWax(dt);
     if (now - meltStart > FALL_TIME * 1000) {
-      altitude = 0;                   // in the water: cut to the results
-      endFlight(flight.flown, true);
+      altitude = 0;                   // in the water: cut to black, then the Oracle
+      endFlight(flight.flown);
     }
   }
 }
@@ -1235,7 +1449,9 @@ function sunState(now) {
   const [x, y] = toScreen(c);
   // Its face resolves as you near it
   const face = mode === "melt" ? 0 : clamp((r / SUN_FACE_R - FACE_FROM) / (1 - FACE_FROM), 0, 1);
-  return { x, y, r, flare, face };
+  // It melts as you near it: 0 far off, 1 when you touch it (and all through the fall)
+  const melt = mode === "melt" ? 1 : Math.pow(clamp((heat - 0.12) / 0.88, 0, 1), 1.3);
+  return { x, y, r, flare, face, melt };
 }
 
 // The sun is a fixed point in the world: turn away and it slides off; fly past and it's behind you
@@ -1254,44 +1470,45 @@ function sunAimNow() {
 // (far = dim + 1px, near = bright + 2px) and each bucket is stroked once.
 const wrap = (v, m) => ((v % m) + m) % m;
 const depthB = (z, far) => Math.pow(clamp(1 - z / far, 0, 1), 1.2);   // depth fade
-let wirePaths = [], dotPaths = [];
+// Two colour sets: red (the default) and blue (set wireBlue = true while drawing a blue thing)
+let wirePaths = [], dotPaths = [], wireBlue = false;
 function beginWire() {
-  wirePaths = Array.from({ length: WIRE_LEVELS }, () => new Path2D());
-  dotPaths = Array.from({ length: WIRE_LEVELS }, () => new Path2D());
+  wirePaths = Array.from({ length: WIRE_LEVELS * 2 }, () => new Path2D());
+  dotPaths = Array.from({ length: WIRE_LEVELS * 2 }, () => new Path2D());
+  wireBlue = false;
 }
 // A red dot (for the falling figures), batched by brightness like the lines
 function wireDot(x, y, s, b) {
   if (b <= 0.02) return;
-  dotPaths[wireLevel(b)].rect(x - s / 2, y - s / 2, s, s);
+  dotPaths[wireLevel(b) + (wireBlue ? WIRE_LEVELS : 0)].rect(x - s / 2, y - s / 2, s, s);
 }
 function wireLevel(b) { return Math.round(clamp(b, 0, 1) * (WIRE_LEVELS - 1)); }
 function wire(x1, y1, x2, y2, b) {
   if (b <= 0.02) return;
-  const p = wirePaths[wireLevel(b)];
+  const p = wirePaths[wireLevel(b) + (wireBlue ? WIRE_LEVELS : 0)];
   p.moveTo(x1, y1); p.lineTo(x2, y2);
 }
 function wirePoly(pts, b, closed = false) {
   if (b <= 0.02 || pts.length < 2) return;
-  const p = wirePaths[wireLevel(b)];
+  const p = wirePaths[wireLevel(b) + (wireBlue ? WIRE_LEVELS : 0)];
   p.moveTo(pts[0][0], pts[0][1]);
   for (let i = 1; i < pts.length; i++) p.lineTo(pts[i][0], pts[i][1]);
   if (closed) p.lineTo(pts[0][0], pts[0][1]);
 }
 function flushWire() {
   const flick = 0.9 + Math.random() * 0.1;        // slight frame-to-frame flicker
-  ctx.strokeStyle = RED;
-  for (let i = 0; i < WIRE_LEVELS; i++) {
-    const t = i / (WIRE_LEVELS - 1);
-    ctx.globalAlpha = (0.12 + 0.88 * t) * flick;
-    ctx.lineWidth = 1 + t;                        // 1px far → 2px near
-    ctx.stroke(wirePaths[i]);
-  }
-  ctx.fillStyle = RED;
-  for (let i = 0; i < WIRE_LEVELS; i++) {
-    ctx.globalAlpha = (0.12 + 0.88 * (i / (WIRE_LEVELS - 1))) * flick;
-    ctx.fill(dotPaths[i]);
+  for (const [off, col] of [[0, RED], [WIRE_LEVELS, BLUE]]) {
+    ctx.strokeStyle = col; ctx.fillStyle = col;
+    for (let i = 0; i < WIRE_LEVELS; i++) {
+      const t = i / (WIRE_LEVELS - 1);
+      ctx.globalAlpha = (0.12 + 0.88 * t) * flick;
+      ctx.lineWidth = 1 + t;                      // 1px far → 2px near
+      ctx.stroke(wirePaths[off + i]);
+      ctx.fill(dotPaths[off + i]);
+    }
   }
   ctx.globalAlpha = 1;
+  wireBlue = false;
 }
 
 // Scanlines over the world (not the body): every third row darkened, flickering
@@ -1316,12 +1533,20 @@ function drawSun(now, s) {
   const f = s.flare, R = s.r, tilt = 0.4, ct = Math.cos(tilt), st = Math.sin(tilt);
   const spin = now / 5000, tw = now / 110;
   const base = 0.55 + 0.45 * f;
+  const mf = s.melt || 0, mt = now / 1000;
   const P = (lat, lon) => {
     const cl = Math.cos(lat), x = cl * Math.sin(lon), y = Math.sin(lat), z = cl * Math.cos(lon);
     const y2 = y * ct - z * st, z2 = y * st + z * ct;          // axis tilted toward the camera
     const w = 1 + f * (0.08 * Math.sin(lat * 6 + lon * 4 + tw) + 0.04 * Math.sin(lon * 9 - tw * 1.7))
                 + f * f * (Math.random() - 0.5) * 0.05;          // warp + jitter
-    return [s.x + x * R * w, s.y - y2 * R * w, z2];
+    // Melting: it bulges at the waist and the lower half sags like wax, in slow uneven runs
+    let xx = x * w, yy = y2 * w;
+    if (mf > 0) {
+      xx *= 1 + mf * 0.18 * (1 - Math.abs(yy));
+      const low = Math.max(0, -yy);
+      yy -= mf * 0.55 * low * low * (1 + 0.35 * Math.sin(lon * 5 + mt * 0.8));
+    }
+    return [s.x + xx * R, s.y - yy * R, z2];
   };
   const seg = (a, b) => wire(a[0], a[1], b[0], b[1], a[2] + b[2] > 0 ? base : base * 0.22);  // back half dim
   for (let la = -60; la <= 60; la += 20) {                       // latitudes
@@ -1338,7 +1563,8 @@ function drawSun(now, s) {
   for (let i = 0; i <= 40; i++) {
     const a = (i / 40) * Math.PI * 2;
     const w = 1 + f * 0.05 * Math.sin(a * 7 + tw) + f * f * (Math.random() - 0.5) * 0.03;
-    limb.push([s.x + Math.cos(a) * R * w, s.y + Math.sin(a) * R * w]);
+    const sag = mf * 0.55 * Math.pow(Math.max(0, Math.sin(a) + 0.25), 2) * (1 + 0.4 * Math.sin(a * 9 + mt));   // the rim runs
+    limb.push([s.x + Math.cos(a) * R * w * (1 + mf * 0.12), s.y + Math.sin(a) * R * w + sag * R]);
   }
   wirePoly(limb, Math.min(1, base + 0.15));
   drawCorona(s, now);
@@ -1819,10 +2045,11 @@ function caption(text, a, y = H * 0.42) {
   if (a <= 0.01) return;
   ctx.save();
   ctx.globalAlpha = clamp(a, 0, 1);
-  ctx.fillStyle = RED;
-  ctx.font = "300 34px system-ui, -apple-system, 'Segoe UI', Roboto, sans-serif";
-  ctx.textAlign = "center"; ctx.textBaseline = "middle";
-  ctx.fillText(glitchText(text), W / 2, y);
+  ctx.font = `italic 700 34px ${SF}`;
+  ctx.textAlign = "center"; ctx.textBaseline = "middle"; ctx.lineJoin = "round";
+  const t = glitchText(text);
+  ctx.lineWidth = 5; ctx.strokeStyle = "#000"; ctx.strokeText(t, W / 2, y);   // the site's hard outline
+  ctx.fillStyle = RED; ctx.fillText(t, W / 2, y);
   ctx.restore();
 }
 
@@ -2016,40 +2243,6 @@ const distOf = o => Math.hypot(o.x - view.x, o.z - travel);
 // Passed behind you or far off to the side of your heading → respawn far ahead
 const passed = (o, behind, wide) => fwdOf(o.x, o.z) < behind || Math.abs(latOf(o.x, o.z)) > wide;
 
-// ---------- Mountains: jagged ridges at the sides ----------
-function drawMountains() {
-  for (const m of mountains) {
-    respawn(m, spawnMountain, 0.5, 60);
-    const b = sceneryB(distOf(m)), P = m.prof;
-    const at = i => [m.x + m.ax * P[i][0] * m.w, P[i][1] * m.h, m.z + m.az * P[i][0] * m.w];
-    for (let i = 1; i < P.length; i++) {
-      const a = at(i - 1), c = at(i);
-      seg3(a[0], a[1], a[2], c[0], c[1], c[2], b);
-    }
-  }
-}
-
-// ---------- Towers: tapering lattice with rings, braces and an antenna ----------
-function drawTowers() {
-  for (const t of towers) {
-    respawn(t, spawnTower, -0.5, 45);
-    const b = sceneryB(distOf(t));
-    const ring = (y, w) => [[t.x - w, y, t.z - w], [t.x + w, y, t.z - w], [t.x + w, y, t.z + w], [t.x - w, y, t.z + w]];
-    let prev = ring(0, 0.3);
-    for (let l = 1; l <= t.levels; l++) {
-      const cur = ring((t.h * l) / t.levels, lerp(0.3, 0.1, l / t.levels));
-      for (let k = 0; k < 4; k++) {
-        const a = prev[k], c = cur[k], n = cur[(k + 1) % 4];
-        seg3(a[0], a[1], a[2], c[0], c[1], c[2], b);           // leg
-        seg3(c[0], c[1], c[2], n[0], n[1], n[2], b);           // ring
-        seg3(a[0], a[1], a[2], n[0], n[1], n[2], b * 0.7);     // brace
-      }
-      prev = cur;
-    }
-    seg3(t.x, t.h, t.z, t.x, t.h + 0.8, t.z, b);               // antenna
-  }
-}
-
 // ---------- Clouds: eye-level outlines that part around the camera ----------
 function drawClouds() {
   for (const c of cloudShapes) {
@@ -2096,127 +2289,428 @@ function drawRidge() {
   }
 }
 
-// ---------- Ruins: rows of columns, some broken, a lintel over the whole ones ----------
-function drawColumns() {
-  for (const c of columns) {
-    respawn(c, spawnColumns, 0, 40);
-    const b = sceneryB(distOf(c));
+// ============================================================
+// v3: the highway at night. Endless poles and sagging wires, motels, gas stations, overpasses,
+// and billboards selling the site's own ads, until they start talking about you.
+// The higher you climb, the stranger it gets.
+// ============================================================
+const weirdNow = () => clamp((viewAlt - WEIRD_FROM) / (WEIRD_FULL - WEIRD_FROM), 0, 1);
+function hash1(n) { const s = Math.sin(n * 127.1 + 311.7) * 43758.5453; return s - Math.floor(s); }
+// Depth fade for a fixed world point (dim far off, fading in at the far end)
+function fadeAt(x, z) {
+  const d = Math.hypot(x - view.x, z - travel);
+  return d >= VIEW_FAR ? 0 : depthB(d, VIEW_FAR) * clamp((VIEW_FAR - d) / 4, 0, 1);
+}
+// Parallel highways along z, every HWY_SPACING across x: the ones near enough to see
+function roadsNear() {
+  const k0 = Math.round(view.x / HWY_SPACING), out = [];
+  for (let k = k0 - 1; k <= k0 + 1; k++) { const rx = k * HWY_SPACING; if (Math.abs(rx - view.x) < VIEW_FAR + POLE_X) out.push(rx); }
+  return out;
+}
+
+// The road: edges and a dashed centre line, sliced so each piece fades by its own distance
+function drawHighway() {
+  const z0 = travel - VIEW_FAR, z1 = travel + VIEW_FAR, SL = 4;
+  for (const rx of roadsNear()) {
+    for (let z = Math.floor(z0 / SL) * SL; z < z1; z += SL) {
+      for (const x of [rx - HWY_HALF, rx + HWY_HALF]) { const b = fadeAt(x, z + SL / 2); if (b > 0.02) seg3(x, 0, z, x, 0, z + SL, b); }
+    }
+    for (let z = Math.floor(z0 / (DASH * 2)) * DASH * 2; z < z1; z += DASH * 2) {
+      const b = fadeAt(rx, z) * 0.7; if (b > 0.02) seg3(rx, 0, z, rx, 0, z + DASH, b);
+    }
+  }
+}
+
+// Cars on the nearest road: pairs of lights, recycled as they leave the view
+function drawCars(dt) {
+  const rx = Math.round(view.x / HWY_SPACING) * HWY_SPACING;
+  for (const c of cars) {
+    c.z += c.v * dt;
+    if (c.z - travel > VIEW_FAR) c.z = travel - VIEW_FAR * 0.3;
+    else if (c.z - travel < -VIEW_FAR * 0.3) c.z = travel + VIEW_FAR * 0.95;
+    const x = rx + c.lane, b = fadeAt(x, c.z);
     if (b <= 0.02) continue;
-    const ax = c.ax, az = c.az, w = 0.13;
-    let prevTop = null;
-    for (let i = 0; i < c.n; i++) {
-      const u = i * c.gap, h = c.h * c.cols[i], whole = c.cols[i] === 1;
-      const x = c.x + ax * u, z = c.z + az * u;
-      // two shaft lines (seen edge-on either side), base and cap squares
-      seg3(x + ax * w, 0, z + az * w, x + ax * w, h, z + az * w, b);
-      seg3(x - ax * w, 0, z - az * w, x - ax * w, h, z - az * w, b);
-      const sq = (y, s) => {
-        const p = [[x + ax * s + az * s, y, z + az * s - ax * s], [x - ax * s + az * s, y, z + az * s + ax * s],
-                   [x - ax * s - az * s, y, z - az * s + ax * s], [x + ax * s - az * s, y, z - az * s - ax * s]];
-        for (let k = 0; k < 4; k++) { const p1 = p[k], p2 = p[(k + 1) % 4]; seg3(p1[0], p1[1], p1[2], p2[0], p2[1], p2[2], b * 0.8); }
-      };
-      sq(0.08, 0.24);
-      if (whole) sq(h, 0.22);
-      else {                                          // broken: a jagged top
-        seg3(x - ax * w, h, z - az * w, x, h + 0.18, z, b); seg3(x, h + 0.18, z, x + ax * w, h - 0.05, z + az * w, b);
+    wireBlue = c.v < 0;                                   // oncoming: blue headlights; yours: red tail lights
+    for (const o of [-0.35, 0.35]) {
+      const p = toCam(x + o, 0.45, c.z);
+      if (p[2] > NEAR) { const s = toScreen(p); wireDot(s[0], s[1], clamp(40 / p[2], 1.5, 7), Math.min(1, b * 1.3)); }
+    }
+    wireBlue = false;
+  }
+}
+
+// Telephone poles both sides of each road, every POLE_GAP, three wires sagging between each pair.
+// Computed straight from where the camera is: nothing to spawn, nothing to keep.
+// Strange: the poles bend toward the sun and the wires sway; higher still, spans snap and whip.
+function drawPoles(now) {
+  const w = weirdNow(), t = now / 1000, bend = w * w;
+  const snap = clamp((viewAlt - 0.72) / 0.2, 0, 1);
+  const k0 = Math.ceil((travel - VIEW_FAR * 0.4) / POLE_GAP), k1 = Math.floor((travel + VIEW_FAR) / POLE_GAP);
+  for (const rx of roadsNear()) for (const s of [-1, 1]) {
+    const x = rx + s * POLE_X;
+    if (Math.abs(x - view.x) > VIEW_FAR) continue;
+    const top = k => {
+      const z = k * POLE_GAP, dx = SUN_X - x, dz = SUN_Z - z, dl = Math.hypot(dx, dz) || 1;
+      const lean = bend * 1.8 * (0.7 + 0.3 * hash1(k * 3 + x));
+      return [x + (dx / dl) * lean, POLE_H - bend * 0.3, z + (dz / dl) * lean];
+    };
+    let T = top(k0);
+    for (let k = k0; k <= k1; k++) {
+      const z = k * POLE_GAP, b = fadeAt(x, z), T2 = top(k + 1);
+      const NS = Math.hypot(x - view.x, z - travel) < 24 ? 6 : 3;     // far spans: fewer wire segments
+      if (b > 0.02) {
+        const mx = lerp(x, T[0], 0.3), mz = lerp(z, T[2], 0.3);
+        seg3(x, 0, z, mx, POLE_H * 0.5, mz, b); seg3(mx, POLE_H * 0.5, mz, T[0], T[1], T[2], b);   // the pole, bending
+        const ay = T[1] - 0.15;
+        seg3(T[0] - ARM, ay, T[2], T[0] + ARM, ay, T[2], b);                                         // crossarm
+        for (const wo of [-ARM * 0.85, 0, ARM * 0.85]) {
+          const ax = T[0] + wo, az = T[2], bx = T2[0] + wo, by = T2[1] - 0.15, bz = T2[2];
+          if (snap > 0 && hash1(k * 7.3 + x * 3.1 + wo * 11) < snap * 0.6) {
+            for (const [ox, oy, oz, dir] of [[ax, ay, az, 1], [bx, by, bz, -1]]) {     // snapped: both ends hang and whip
+              let px = ox, py = oy, pz = oz;
+              for (let i = 1; i <= 4; i++) {
+                const u = i / 4, whip = Math.sin(t * 9 + k * 1.7 + i + dir) * 0.7 * u;
+                const qx = ox + whip, qy = oy - u * 2.2, qz = oz + dir * u * POLE_GAP * 0.18;
+                seg3(px, py, pz, qx, qy, qz, b); px = qx; py = qy; pz = qz;
+              }
+            }
+          } else {                                                                      // a catenary, swaying when strange
+            let px = ax, py = ay, pz = az;
+            const sway = 1 + w * 0.8 * Math.sin(t * 3 + k + wo * 5);
+            for (let i = 1; i <= NS; i++) {
+              const u = i / NS, sag = WIRE_SAG * 4 * u * (1 - u) * sway;
+              const qx = lerp(ax, bx, u), qy = lerp(ay, by, u) - sag, qz = lerp(az, bz, u);
+              seg3(px, py, pz, qx, qy, qz, b * 0.85); px = qx; py = qy; pz = qz;
+            }
+          }
+        }
       }
-      if (whole && prevTop) seg3(prevTop[0], c.h + 0.12, prevTop[1], x, c.h + 0.12, z, b);   // lintel
-      prevTop = whole ? [x, z] : null;
+      T = T2;
     }
   }
 }
 
-// ---------- Labyrinth: low maze walls on the ground, drawn as top edge + posts ----------
-function drawMaze() {
-  for (const m of mazes) {
-    respawn(m, spawnMaze, -2, 36);
-    const b = sceneryB(distOf(m)) * 0.9;
+// Overpasses: a deck across each road on pillars, every OVERPASS_GAP
+function drawOverpasses() {
+  const m0 = Math.ceil((travel - VIEW_FAR * 0.3 - OVERPASS_AT) / OVERPASS_GAP), m1 = Math.floor((travel + VIEW_FAR - OVERPASS_AT) / OVERPASS_GAP);
+  for (const rx of roadsNear()) for (let m = m0; m <= m1; m++) {
+    const z = OVERPASS_AT + m * OVERPASS_GAP, b = fadeAt(rx, z) * 0.9;
     if (b <= 0.02) continue;
-    for (const [x1, z1, x2, z2] of m.walls) {
-      const ax = m.x + x1, az = m.z + z1, bx = m.x + x2, bz = m.z + z2;
-      seg3(ax, m.h, az, bx, m.h, bz, b);              // top edge
-      seg3(ax, 0, az, ax, m.h, az, b * 0.7);          // post
-      seg3(bx, 0, bz, bx, m.h, bz, b * 0.7);
+    const y = 2.6, half = 14, th = 0.45, dz = 1.2;
+    for (const zz of [z - dz, z + dz]) {
+      seg3(rx - half, y, zz, rx + half, y, zz, b); seg3(rx - half, y + th, zz, rx + half, y + th, zz, b);   // deck
+      seg3(rx - half, y + th + 0.5, zz, rx + half, y + th + 0.5, zz, b * 0.6);                              // railing
+    }
+    for (const px of [-HWY_HALF - 1, HWY_HALF + 1, -10, 10]) {
+      seg3(rx + px, 0, z - dz, rx + px, y, z - dz, b); seg3(rx + px, 0, z + dz, rx + px, y, z + dz, b);     // pillars
     }
   }
 }
 
-// ---------- Rings in the air: fly through one and it rings ----------
-function drawRings(now) {
-  for (const r of rings) {
-    respawn(r, spawnRing, -1, 30);
-    const f = fwdOf(r.x, r.z);
-    // crossing its plane, inside its radius → hit
-    if (mode === "live" && r.prevFwd > 0 && f <= 0 && Math.abs(latOf(r.x, r.z)) < r.r && Math.abs(view.h - r.y) < r.r) {
-      r.hit = now; ringChime();
-      for (let k = 0; k < 12 && feathers.length < FEATHER_CAP; k++) {
-        feathers.push({ x: W / 2 + (Math.random() - 0.5) * W * 0.6, y: H / 2 + (Math.random() - 0.5) * H * 0.6,
-                        vx: (Math.random() - 0.5) * 120, vy: -60 + Math.random() * 40,
-                        ph: Math.random() * 6.28, life: 0, max: 1.2 + Math.random(), size: 1.8 + Math.random() });
-      }
-    }
-    r.prevFwd = f;
-    const flash = clamp(1 - (now - r.hit) / 600, 0, 1);
-    const b = Math.min(1, sceneryB(distOf(r)) * (0.9 + 0.6 * flash) + flash * 0.3);
+// Queue a sign's lettering: the top-left, top-right and bottom-left corners of its face (world)
+function queueSign(tl, tr, bl, lines, blue, seed, b) {
+  const a = toCam(...tl), c = toCam(...tr), d = toCam(...bl);
+  if (a[2] < NEAR * 4 || c[2] < NEAR * 4 || d[2] < NEAR * 4) return;
+  const p0 = toScreen(a), p1 = toScreen(c), p3 = toScreen(d);
+  if (Math.hypot(p1[0] - p0[0], p1[1] - p0[1]) < 30) return;          // too small to read
+  if (signText.length < 12) signText.push({ pts: [p0, p1, p3], lines, blue, seed, b });
+}
+
+// Billboards: frame, legs, catwalk. Strange: they rise on impossible legs to meet you, and the ads turn to you.
+function drawBillboards() {
+  const w = weirdNow(), rise = Math.pow(w, 1.5);
+  let nearest = Infinity;
+  for (const bb of billboards) {
+    respawn(bb, spawnBillboard, -1, 45);
+    const d = distOf(bb), b = sceneryB(d);
     if (b <= 0.02) continue;
-    const n = 14, pts = [];
-    for (let i = 0; i < n; i++) {
-      const a = (i / n) * Math.PI * 2, s = r.r * (1 + flash * 0.15);
-      pts.push([r.x + r.ax * Math.cos(a) * s, r.y + Math.sin(a) * s, r.z + r.az * Math.cos(a) * s]);
-    }
-    for (let i = 0; i < n; i++) { const p = pts[i], q = pts[(i + 1) % n]; seg3(p[0], p[1], p[2], q[0], q[1], q[2], b); }
+    bb.reroll -= dtWorld;
+    if (bb.reroll <= 0) { bb.reroll = 3 + Math.random() * 5; if (Math.random() < 0.15 + w) pickAd(bb); }
+    const L = bb.leg + rise * Math.max(0, view.h - bb.h * 0.6 - bb.leg) * (0.75 + 0.25 * hash1(bb.seed));
+    const ax = bb.ax, az = bb.az;
+    const corner = (u, v) => [bb.x + ax * u, L + v, bb.z + az * u];
+    const c = [corner(0, bb.h), corner(bb.w, bb.h), corner(bb.w, 0), corner(0, 0)];
+    nearest = Math.min(nearest, Math.hypot(d, L + bb.h / 2 - view.h));
+    wireBlue = bb.blue;
+    for (let i = 0; i < 4; i++) seg3(...c[i], ...c[(i + 1) % 4], b);
+    for (const u of [bb.w * 0.25, bb.w * 0.75]) { const p = corner(u, 0); seg3(p[0], 0, p[2], p[0], L, p[2], b * 0.8); }   // legs
+    seg3(...corner(-0.2, -0.25), ...corner(bb.w + 0.2, -0.25), b * 0.6);                                                    // catwalk
+    for (const u of [0.15, 0.5, 0.85]) seg3(...corner(bb.w * u, -0.25), ...corner(bb.w * u - 0.25, -0.6), b * 0.6);         // lamps
+    wireBlue = false;
+    queueSign(c[0], c[1], c[3], bb.ad, bb.blue, bb.seed, b);
   }
+  for (const m of motels) nearest = Math.min(nearest, Math.hypot(distOf(m), m.h - view.h));
+  neonNear = clamp(1 - nearest / 14, 0, 1);
 }
 
-// ---------- Giant feathers, turning as they drift down ----------
-function drawBigFeathers(now, dt) {
-  const t = now / 1000;
-  for (const f of bigFeathers) {
-    if (mode === "live" || mode === "results") { f.y += f.vy * dt; f.ang += f.spin * dt; }
-    if (f.y < -1 || fwdOf(f.x, f.z) < -3 || Math.abs(latOf(f.x, f.z)) > 40) spawnBigFeather(f, 10 + Math.random() * 40);
-    const b = sceneryB(distOf(f)) * 0.9;
+function drawMotels() {
+  for (const m of motels) {
+    respawn(m, spawnMotel, -1, 45);
+    const b = sceneryB(distOf(m));
     if (b <= 0.02) continue;
-    const rx = view.hz, rz = -view.hx;                // billboard plane: your right vector + up
-    const ang = f.ang + Math.sin(t * 0.7 + f.sway) * 0.3;
-    const ca = Math.cos(ang), sa = Math.sin(ang), L = f.len;
-    const P = (u, v) => [f.x + rx * (u * ca - v * sa), f.y + (u * sa + v * ca), f.z + rz * (u * ca - v * sa)];
-    const tip = P(L / 2, 0), base = P(-L / 2, 0);
-    seg3(base[0], base[1], base[2], tip[0], tip[1], tip[2], b);          // the shaft
-    for (let i = 1; i <= 5; i++) {                                        // barbs, both sides
-      const u = -L / 2 + (i / 6) * L, w = L * 0.18 * Math.sin((i / 6) * Math.PI);
-      const o = P(u, 0), p1 = P(u + L * 0.08, w), p2 = P(u + L * 0.08, -w);
-      seg3(o[0], o[1], o[2], p1[0], p1[1], p1[2], b * 0.8);
-      seg3(o[0], o[1], o[2], p2[0], p2[1], p2[2], b * 0.8);
-    }
+    const P = (u, y) => [m.x + m.ax * u, y, m.z + m.az * u];
+    const sw = 2.6, y0 = m.h - 1.1;
+    seg3(...P(0, 0), ...P(0, y0), b);                                     // the pole
+    wireBlue = true;
+    const box = [P(-sw / 2, m.h), P(sw / 2, m.h), P(sw / 2, y0), P(-sw / 2, y0)];
+    for (let i = 0; i < 4; i++) seg3(...box[i], ...box[(i + 1) % 4], b);
+    const ar = [P(sw / 2 + 0.2, y0 - 0.1), P(sw / 2 + 0.9, y0 - 0.45), P(sw / 2 + 0.2, y0 - 0.8)];   // the arrow
+    seg3(...ar[0], ...ar[1], b); seg3(...ar[1], ...ar[2], b);
+    wireBlue = false;
+    queueSign(box[0], box[1], box[3], ["MOTEL", m.vacancy ? "VACANCY" : "NO VACANCY"], true, m.seed, b);
   }
 }
 
-// ---------- The colossus ----------
-function drawColossus() {
-  respawn(colossus, spawnColossus, -2, 50);
-  const b = sceneryB(distOf(colossus)) * 0.7;
-  if (b > 0.02) drawStanding(colossus.x, colossus.z, COLOSSUS_SCALE, b);
+function drawGas() {
+  for (const g of gasStations) {
+    respawn(g, spawnGas, -1, 45);
+    const b = sceneryB(distOf(g));
+    if (b <= 0.02) continue;
+    const ax = g.ax, az = g.az, fx = -az, fz = ax;                 // across, and away along the heading
+    const P = (u, y, v) => [g.x + ax * u + fx * v, y, g.z + az * u + fz * v];
+    const c = [P(0, g.h, 0), P(g.w, g.h, 0), P(g.w, g.h, g.d), P(0, g.h, g.d)];
+    const top = c.map(p => [p[0], p[1] + 0.9, p[2]]);               // the tall fascia
+    for (let i = 0; i < 4; i++) { seg3(...c[i], ...c[(i + 1) % 4], b); seg3(...top[i], ...top[(i + 1) % 4], b * 0.7); seg3(...c[i], ...top[i], b * 0.7); }
+    for (const [u, v] of [[0.4, 0.4], [g.w - 0.4, 0.4], [0.4, g.d - 0.4], [g.w - 0.4, g.d - 0.4]]) seg3(...P(u, 0, v), ...P(u, g.h, v), b * 0.8);
+    wireBlue = true;
+    for (const u of [g.w * 0.33, g.w * 0.66]) {                    // pumps
+      const a = P(u - 0.2, 0, g.d / 2), q = P(u + 0.2, 0, g.d / 2);
+      seg3(a[0], 0, a[2], a[0], 1.1, a[2], b * 0.7); seg3(q[0], 0, q[2], q[0], 1.1, q[2], b * 0.7); seg3(a[0], 1.1, a[2], q[0], 1.1, q[2], b * 0.7);
+    }
+    wireBlue = false;
+    queueSign(top[0], top[1], c[0], ["GAS · 24 HRS", "feelings extra."], false, g.seed, b);
+  }
+}
+
+// The lettering, after the wires: the site's bold italic serif with its hard black outline, mapped onto
+// each face. Neon buzz: a sign cuts out for a beat now and then. Strange: letters turn Greek.
+// Near the top: the ads melt, letters sliding down and stretching.
+function drawSigns(now) {
+  if (!signText.length) return;
+  const BWv = 400, BHv = 168, w = weirdNow();
+  const melt = clamp((viewAlt - MELT_ADS) / (1 - MELT_ADS), 0, 1);
+  ctx.save();
+  ctx.textAlign = "center"; ctx.textBaseline = "middle"; ctx.lineJoin = "round";
+  for (const s of signText) {
+    if (hash1(s.seed + Math.floor(now / 70)) < 0.04 + 0.12 * w) continue;     // neon buzz: off for a beat
+    const [p0, p1, p3] = s.pts;
+    ctx.setTransform((p1[0] - p0[0]) / BWv, (p1[1] - p0[1]) / BWv, (p3[0] - p0[0]) / BHv, (p3[1] - p0[1]) / BHv, p0[0], p0[1]);
+    ctx.globalAlpha = clamp(s.b * 1.3, 0, 1) * (0.85 + 0.15 * Math.random());
+    signLine(s.lines[0], BWv / 2, 66, 54, s.blue ? BLUE : RED, melt, s.seed, w, now);
+    signLine(s.lines[1], BWv / 2, 126, 28, s.blue ? RED : BLUE, melt, s.seed + 9, w, now);
+  }
+  ctx.restore();
+  signText = [];
+}
+function signLine(str, cx, cy, size, col, melt, seed, w, now) {
+  let txt = str;
+  if (w > 0) {
+    const tick = Math.floor(now / 140);
+    txt = [...txt].map((ch, i) => (ch !== " " && hash1(seed + i * 13 + tick) < w * 0.14 ? GREEK[(i * 7 + tick) % GREEK.length] : ch)).join("");
+  }
+  txt = glitchText(txt);
+  ctx.font = `italic 700 ${size}px ${SF}`;
+  let width = ctx.measureText(txt).width;
+  if (width > 380) { size = Math.floor(size * 380 / width); ctx.font = `italic 700 ${size}px ${SF}`; width = ctx.measureText(txt).width; }
+  ctx.lineWidth = Math.max(3, size * 0.16); ctx.strokeStyle = "#000"; ctx.fillStyle = col;
+  if (melt <= 0) { ctx.strokeText(txt, cx, cy); ctx.fillText(txt, cx, cy); return; }
+  // melting: letter by letter, each sliding down and stretching at its own pace
+  const chars = [...txt], a0 = ctx.globalAlpha;
+  let x = cx - width / 2;
+  for (let i = 0; i < chars.length; i++) {
+    const cw = ctx.measureText(chars[i]).width, k = hash1(seed + i * 3.7);
+    const drop = melt * melt * (40 + 200 * k) * (0.7 + 0.3 * Math.sin(now / 900 + i));
+    ctx.save();
+    ctx.globalAlpha = a0 * (1 - melt * 0.6 * k);
+    ctx.translate(x + cw / 2, cy + drop);
+    ctx.scale(1, 1 + melt * 1.8 * k);
+    ctx.strokeText(chars[i], 0, 0); ctx.fillText(chars[i], 0, 0);
+    ctx.restore();
+    x += cw;
+  }
+}
+
+// ---------- The sun melting: drips fall off its sagging rim and past you ----------
+function updateDrips(dt, s) {
+  const m = s.melt || 0;
+  if ((mode === "live" || mode === "melt") && s.r > 4 && m > 0.05) {
+    const n = Math.min(4, Math.floor(m * m * 45 * dt + Math.random()));
+    for (let i = 0; i < n && sunDrips.length < DRIP_CAP; i++) {
+      const a = (0.12 + 0.76 * Math.random()) * Math.PI;           // somewhere on the lower rim
+      const sag = m * 0.55 * Math.pow(Math.max(0, Math.sin(a) + 0.25), 2);
+      sunDrips.push({ x: s.x + Math.cos(a) * s.r * (1 + m * 0.12), y: s.y + Math.sin(a) * s.r * (1 + sag),
+                      vx: (Math.random() - 0.5) * 30, vy: 20 + Math.random() * 80, size: 1.5 + Math.random() * 2.5 * (1 + m) });
+    }
+  }
+  const g = 500 + 900 * m;
+  sunDrips = sunDrips.filter(d => { d.vy += g * dt; d.x += d.vx * dt; d.y += d.vy * dt; d.size *= 1 + 0.25 * dt; return d.y < H + 100; });
+  // The wings' wax: drops running in from the edges of the frame, with the hands' burning
+  const hot = Math.max(heat, burnAmt);
+  if ((mode === "live" || mode === "melt") && hot > 0.1 && edgeDrips.length < EDGE_CAP && Math.random() < hot * hot * 14 * dt) {
+    const left = Math.random() < 0.5;
+    edgeDrips.push({ x: left ? Math.random() * W * 0.08 : W - Math.random() * W * 0.08, y: -10 - Math.random() * H * 0.2,
+                     vy: 40 + Math.random() * 90, size: 2.5 + Math.random() * 3.5, c: WAX_COLORS[(Math.random() * WAX_COLORS.length) | 0] });
+  }
+  edgeDrips = edgeDrips.filter(d => { d.vy += 480 * dt; d.y += d.vy * dt; return d.y < H + 80; });
+}
+function drawDrips() {
+  if (!sunDrips.length && !edgeDrips.length) return;
+  ctx.save();
+  ctx.lineCap = "round";
+  if (sunDrips.length) {
+    const p = new Path2D();
+    for (const d of sunDrips) { const len = clamp(d.vy * 0.05, 4, 90) * (1 + d.size * 0.15); p.moveTo(d.x - d.vx * 0.03, d.y - len); p.lineTo(d.x, d.y); }
+    ctx.globalAlpha = 0.28; ctx.strokeStyle = RED; ctx.lineWidth = 8; ctx.stroke(p);           // glow
+    ctx.globalAlpha = 0.95; ctx.strokeStyle = "rgb(255, 160, 70)"; ctx.lineWidth = 2.4; ctx.stroke(p);   // hot core
+  }
+  ctx.globalAlpha = 0.9;
+  for (const d of edgeDrips) {
+    const len = clamp(d.vy * 0.06, 6, 70);
+    ctx.strokeStyle = d.c; ctx.lineWidth = d.size;
+    ctx.beginPath(); ctx.moveTo(d.x, d.y - len); ctx.lineTo(d.x, d.y); ctx.stroke();
+  }
+  ctx.restore();
+}
+
+// ============================================================
+// THE ORACLE: a digital magic 8-ball rising out of dark water
+// ============================================================
+const ICO = (() => {
+  const p = (1 + Math.sqrt(5)) / 2;
+  const v = [[-1, p, 0], [1, p, 0], [-1, -p, 0], [1, -p, 0], [0, -1, p], [0, 1, p], [0, -1, -p], [0, 1, -p], [p, 0, -1], [p, 0, 1], [-p, 0, -1], [-p, 0, 1]]
+    .map(a => { const l = Math.hypot(...a); return a.map(c => c / l); });
+  const e = [];
+  for (let i = 0; i < 12; i++) for (let j = i + 1; j < 12; j++) if (Math.hypot(v[i][0] - v[j][0], v[i][1] - v[j][1], v[i][2] - v[j][2]) < 1.1) e.push([i, j]);
+  return { v, e };   // 12 vertices, 30 edges
+})();
+
+function wrapText(txt, maxW) {
+  const lines = [];
+  let cur = "";
+  for (const wd of txt.split(" ")) {
+    const t = cur ? cur + " " + wd : wd;
+    if (cur && ctx.measureText(t).width > maxW) { lines.push(cur); cur = wd; } else cur = t;
+  }
+  if (cur) lines.push(cur);
+  return lines;
+}
+
+function drawOracle(now) {
+  const o = oracle, t = (now - o.start) / 1000;
+  ctx.fillStyle = "#000"; ctx.fillRect(0, 0, W, H);
+  if (t < ORACLE_DARK) return;                               // black, and quiet
+  const u = smooth01(clamp((t - ORACLE_DARK) / ORACLE_RISE, 0, 1));
+  const R = Math.min(W, H) * 0.3, waterY = H * 0.74;
+  const cx = W / 2, cy = lerp(H + R * 1.3, H * 0.4, u) + (u >= 1 ? Math.sin(t * 0.9) * R * 0.02 : 0);
+  ctx.save();
+  // the ball: a dark blue liquid window, specks drifting in it
+  const g = ctx.createRadialGradient(cx, cy - R * 0.25, R * 0.1, cx, cy, R);
+  g.addColorStop(0, "rgb(16, 16, 96)"); g.addColorStop(1, "#000");
+  ctx.fillStyle = g; ctx.beginPath(); ctx.arc(cx, cy, R, 0, Math.PI * 2); ctx.fill();
+  ctx.globalAlpha = 0.7; ctx.strokeStyle = BLUE; ctx.lineWidth = 2; ctx.stroke();
+  ctx.save();
+  ctx.beginPath(); ctx.arc(cx, cy, R - 2, 0, Math.PI * 2); ctx.clip();
+  ctx.fillStyle = BLUE;
+  for (let i = 0; i < 40; i++) {
+    const px = cx + (hash1(i) - 0.5) * 2 * R + Math.sin(t * 0.3 + i) * 10;
+    const py = cy - R + ((hash1(i + 50) * 2 * R + t * 8 * (0.5 + hash1(i + 90))) % (2 * R));
+    ctx.globalAlpha = 0.25 + 0.2 * Math.sin(t + i); ctx.fillRect(px, py, 2, 2);
+  }
+  // the icosahedron, turning slowly, glowing
+  const rs = R * 0.7, ay = t * 0.35, ax = 0.45 + Math.sin(t * 0.21) * 0.25;
+  const cyA = Math.cos(ay), syA = Math.sin(ay), cxA = Math.cos(ax), sxA = Math.sin(ax);
+  const P = ICO.v.map(([x, y, z]) => {
+    const x1 = x * cyA + z * syA, z1 = -x * syA + z * cyA;
+    const y1 = y * cxA - z1 * sxA, z2 = y * sxA + z1 * cxA;
+    const k = 3 / (3 + z2);
+    return [cx + x1 * rs * k, cy + y1 * rs * k, z2];
+  });
+  ctx.lineWidth = 2; ctx.strokeStyle = BLUE; ctx.shadowColor = BLUE; ctx.shadowBlur = 18;
+  for (const back of [true, false]) {
+    ctx.globalAlpha = back ? 0.25 : 0.95;
+    ctx.beginPath();
+    for (const [i, j] of ICO.e) if ((P[i][2] + P[j][2] > 0) === back) { ctx.moveTo(P[i][0], P[i][1]); ctx.lineTo(P[j][0], P[j][1]); }
+    ctx.stroke();
+  }
+  ctx.shadowBlur = 0;
+  // the window: the triangle facing you, where the answer floats up
+  const tr = R * 0.66;
+  ctx.globalAlpha = 0.9; ctx.fillStyle = "rgb(8, 8, 48)"; ctx.strokeStyle = BLUE; ctx.lineWidth = 2;
+  ctx.beginPath();
+  for (let i = 0; i < 3; i++) { const a = Math.PI / 2 + (i * Math.PI * 2) / 3; ctx[i ? "lineTo" : "moveTo"](cx + Math.cos(a) * tr, cy - tr * 0.2 + Math.sin(a) * tr); }
+  ctx.closePath(); ctx.fill(); ctx.stroke();
+  ctx.restore();   // (the ball's clip)
+  // the water, over the ball's lower part: slow blue swell lines
+  ctx.globalAlpha = 1; ctx.fillStyle = "#000"; ctx.fillRect(0, waterY, W, H - waterY);
+  ctx.strokeStyle = BLUE; ctx.lineWidth = 1.5;
+  for (let k = 0; k < 7; k++) {
+    const y = waterY + k * k * 7;
+    ctx.globalAlpha = 0.45 * (1 - k / 7) * clamp(t - ORACLE_DARK, 0, 1);
+    ctx.beginPath();
+    for (let x = 0; x <= W; x += 16) { const yy = y + Math.sin(x * 0.01 + t * 0.8 + k) * (3 + k); x ? ctx.lineTo(x, yy) : ctx.moveTo(x, yy); }
+    ctx.stroke();
+  }
+  // the truth, letter by letter, glitching in: the site's type with its hard outline
+  const T0 = ORACLE_DARK + ORACLE_RISE;
+  if (t >= T0) {
+    const text = o.truth.text, n = Math.min(text.length, Math.floor(((t - T0) * 1000) / LETTER_MS));
+    let shown = [...text.slice(0, n)].map(c => (c !== " " && Math.random() < 0.025 ? GREEK[(Math.random() * GREEK.length) | 0] : c)).join("");
+    if (n < text.length) shown += GREEK[(Math.random() * GREEK.length) | 0];        // the next letter, still static
+    const fs = Math.round(R * 0.12);
+    ctx.font = `italic 700 ${fs}px ${SF}`; ctx.textAlign = "center"; ctx.textBaseline = "middle"; ctx.lineJoin = "round";
+    const lines = wrapText(shown, tr * 1.05);
+    ctx.globalAlpha = 1;
+    lines.forEach((ln, i) => {
+      const y = cy - tr * 0.42 + (i - (lines.length - 1) / 2) * fs * 1.1;
+      ctx.lineWidth = Math.max(4, fs * 0.18); ctx.strokeStyle = "#000"; ctx.strokeText(ln, cx, y);
+      ctx.fillStyle = RED; ctx.fillText(ln, cx, y);
+    });
+    // tiny text under it (on the canvas, so it's in the clip too)
+    ctx.font = `16px "Courier New", Courier, monospace`;
+    ctx.fillStyle = BLUE; ctx.globalAlpha = clamp((t - T0) / 1.5, 0, 1);
+    const count = o.final ? `ALL ${o.total} LEARNED · THE CYCLE BEGINS AGAIN`
+      : `TRUTH ${String(o.learned).padStart(2, "0")} OF ${o.total} LEARNED`;
+    ctx.fillText(count, cx, waterY + 26);
+    if (o.hint) { ctx.fillStyle = RED; ctx.fillText(o.hint, cx, waterY + 48); }
+    ctx.fillStyle = "rgb(170, 0, 0)"; ctx.font = `12px "Courier New", Courier, monospace`;
+    ctx.fillText("ICARUS · LIVE.AND.DIE", cx, 24);
+  }
+  ctx.restore();
+}
+
+// The Oracle's timeline: speak as the letters start; the buttons once it's complete; then end the clip
+function updateOracle(now) {
+  const o = oracle, t = (now - o.start) / 1000, T0 = ORACLE_DARK + ORACLE_RISE;
+  if (!o.spoken && t >= T0) { o.spoken = true; speakTruth(o.truth.text); }
+  const done = T0 + (o.truth.text.length * LETTER_MS) / 1000;
+  if (!o.shown && t >= done + 0.8) {
+    o.shown = true;
+    $("voiceBtn").textContent = voiceOn ? "VOICE: ON" : "VOICE: OFF";
+    $("results").classList.remove("hidden");
+  }
+  if (recorder && t >= done + CLIP_TAIL) stopRecording();
 }
 
 // The whole world, in one batched stroke pass, then scanlines
 function drawWorld(now, dt, sun) {
   beginWire();
+  dtWorld = dt;
   // During the long fall the land gives way to the sea once the nose is down
   const fallT = mode === "melt" ? (now - meltStart) / 1000 : -1;
   const land = fallT < FALL_UP * 0.8;
   if (land) {
     drawRidge();
     drawGround();
-    drawMaze();
-    drawMountains();
-    drawColumns();
-    drawTowers();
-    drawColossus();
-    drawRings(now);
-    drawBigFeathers(now, dt);
+    drawHighway();
+    drawCars(dt);
+    drawPoles(now);
+    drawOverpasses();
+    drawBillboards();
+    drawMotels();
+    drawGas();
     drawClouds();
     drawSpeedLines();
-  }
+  } else { neonNear = 0; signText = []; }
   if (fallT >= FALL_UP * 0.5) drawSea(now, clamp((fallT - FALL_UP * 0.5) / 0.6, 0, 1));
   drawHorizon();
   drawGhosts();
@@ -2224,6 +2718,7 @@ function drawWorld(now, dt, sun) {
   drawFigures();
   drawSunWithLies(now, sun);
   flushWire();
+  drawSigns(now);                     // the lettering, over its own sign frames
   drawScanlines();
 }
 
@@ -2277,15 +2772,19 @@ function render(now, dt) {
   if (stutterLeft > 0) { stutterLeft--; return; }
   if (Math.random() < glitchAmt() * 0.05) stutterLeft = 1 + ((Math.random() * 3) | 0);
 
+  if (mode === "oracle" && oracle) { drawOracle(now); updateOracle(now); return; }
+
   ctx.fillStyle = "#000";
   ctx.fillRect(0, 0, W, H);
   drawRain();                         // Greek rain, behind everything
 
   const sun = sunState(now);
+  updateDrips(dt, sun);
 
   if (mode === "melt") {
     const t = (now - meltStart) / 1000;
     drawWorld(now, dt, sun);
+    drawDrips();                      // the sun's drips and the wings' wax, falling with you
     drawBody(now);                    // CRASH: bones over the camera; you fall through the gaps
     drawWax(dt);
     drawFeathers(dt);
@@ -2300,6 +2799,7 @@ function render(now, dt) {
 
   drawWorld(now, dt, sun);
   tearFrame();                        // lines tear and offset at high heat
+  drawDrips();                        // the sun melting past you; wax running off the wings at the edges
   drawBody(now);                      // the hands, burning to the bone as heat rises
   drawWax(dt);
   drawFeathers(dt);
@@ -2327,6 +2827,8 @@ $("reach").onclick = async () => {
   btn.disabled = true;
   try {
     const motion = requestMotion();   // first: iOS only allows the permission prompt inside the tap
+    primeSpeech();                    // speech is only allowed after a tap: unlock it now for the Oracle
+    loadTruths();
     recalibrate();                    // "level" = however the phone is held right now
     audio = initAudio();              // must happen inside the tap
     await audio.ac.resume();
@@ -2354,6 +2856,10 @@ $("again").onclick = () => {
     catch (e) { console.warn("Fullscreen failed", e); }
   }
   $("results").classList.add("hidden");
+  $("truthsPage").hidden = true;
+  oracle = null;
+  try { speechSynthesis.cancel(); } catch (e) { /* no speech */ }
+  stopRecording();
   altitude = 0; altVel = 0; heat = 0; seaSince = 0;
   wax = []; feathers = []; figures = []; visorDrops = []; frags = []; burnt.clear();
   lie = null; lieTextUntil = 0; tilt = null;
@@ -2366,8 +2872,21 @@ $("again").onclick = () => {
   respawnAll();
   recalibrate();                      // "level" = however the phone is held when you tap
   releaseVoice();                     // drop any leftover melt automation
+  if (audio) audio.oracleGain.gain.setTargetAtTime(0, audio.ac.currentTime, 0.3);
+  sunDrips = []; edgeDrips = [];
   mode = "live";
 };
+
+$("voiceBtn").onclick = () => {
+  voiceOn = !voiceOn;
+  try { localStorage.setItem(VOICE_KEY, voiceOn ? "1" : "0"); } catch (e) { /* private mode */ }
+  $("voiceBtn").textContent = voiceOn ? "VOICE: ON" : "VOICE: OFF";
+  if (!voiceOn) { try { speechSynthesis.cancel(); } catch (e) { /* no speech */ } }
+  else if (oracle) speakTruth(oracle.truth.text);
+};
+$("saveClip").onclick = () => saveClip();
+$("truthsBtn").onclick = $("truthsBtn2").onclick = () => showTruths();
+$("truthsClose").onclick = () => { $("truthsPage").hidden = true; };
 
 // Browsers may suspend audio in the background; wake it on return
 document.addEventListener("visibilitychange", () => {

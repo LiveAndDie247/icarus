@@ -1,0 +1,42 @@
+{
+  "about": "The Oracle's truths. One per flight, shuffled without repeats. 'deep' ones only come to flights that got very close to the sun. 'final' appears once all the others are learned, then the cycle restarts. Add more: give each a unique id.",
+  "truths": [
+    { "id": "t01", "text": "there is no end" },
+    { "id": "t02", "text": "the sun was never hot. you were cold." },
+    { "id": "t03", "text": "your father built the wings and the fall" },
+    { "id": "t04", "text": "everything you bought is still watching" },
+    { "id": "t05", "text": "the sky is a ceiling someone painted" },
+    { "id": "t06", "text": "the ads were always for you" },
+    { "id": "t07", "text": "you have already landed" },
+    { "id": "t08", "text": "the wax remembers" },
+    { "id": "t09", "text": "nobody is driving" },
+    { "id": "t10", "text": "the light pole is listening" },
+    { "id": "t11", "text": "it was a recording" },
+    { "id": "t12", "text": "you were the product" },
+    { "id": "t13", "text": "the wire carries your name" },
+    { "id": "t14", "text": "the sea is where the sun goes to forget" },
+    { "id": "t15", "text": "heaven has a return policy" },
+    { "id": "t16", "text": "the clouds are rented" },
+    { "id": "t17", "text": "you flew this before. you will again." },
+    { "id": "t18", "text": "the store never closes" },
+    { "id": "t19", "text": "every feeling has a barcode" },
+    { "id": "t20", "text": "god is a billboard facing the other way" },
+    { "id": "t21", "text": "your shadow got there first" },
+    { "id": "t22", "text": "the ground was the reward" },
+    { "id": "t23", "text": "the truth is on sale" },
+    { "id": "t24", "text": "it does not get better. it gets brighter." },
+    { "id": "t25", "text": "no one saw you fall" },
+    { "id": "t26", "text": "someone saw you fall" },
+    { "id": "t27", "text": "the answer is yes, and that is the problem" },
+    { "id": "t28", "text": "you were never high enough to see the edge" },
+    { "id": "t29", "text": "the gods are a franchise" },
+    { "id": "t30", "text": "the static is the message" }
+  ],
+  "deep": [
+    { "id": "d01", "text": "the sun is a hole" },
+    { "id": "d02", "text": "you are the one who melts" },
+    { "id": "d03", "text": "it was always noon" },
+    { "id": "d04", "text": "there was never a father" }
+  ],
+  "final": { "id": "final", "text": "ask again." }
+}
