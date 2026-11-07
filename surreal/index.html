@@ -1,0 +1,1496 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
+<meta name="theme-color" content="#000000">
+<title>ICARUS — LIVE.AND.DIE</title>
+<meta name="description" content="ICARUS by LIVE.AND.DIE. tilt to rise. Results not guaranteed. Truth subject to availability.">
+<meta property="og:type" content="website">
+<meta property="og:site_name" content="LIVE.AND.DIE">
+<meta property="og:title" content="ICARUS">
+<meta property="og:description" content="tilt to rise.">
+<meta property="og:url" content="https://liveanddie247.github.io/icarus/surreal/">
+<meta property="og:image" content="https://liveanddie247.github.io/icarus/og.png">
+<meta name="twitter:card" content="summary_large_image">
+<style>
+  :root { --r: #ff0000; --r2: #aa0000; --r3: #4a0000; --b: #3a3aff; --b2: #2222cc; --b3: #101060;
+          --sf: "Times New Roman", Times, "Liberation Serif", serif; --tt: "Courier New", Courier, monospace; }
+  html, body { height: 100%; margin: 0; background: #000; overflow: hidden; color: var(--b); font-family: var(--sf);
+               touch-action: none; user-select: none; -webkit-user-select: none; -webkit-touch-callout: none; }
+  canvas { position: fixed; inset: 0; width: 100%; height: 100%; display: block; }
+  [hidden] { display: none !important; }
+  .ov { position: fixed; inset: 0; display: flex; flex-direction: column; align-items: center; justify-content: center;
+        gap: 14px; text-align: center; padding: 16px; box-sizing: border-box; }
+  #go { font: italic 700 clamp(34px, 10vmin, 76px)/1 var(--sf); color: var(--r); background: none; border: 0; padding: 24px; cursor: pointer;
+        text-shadow: 2px 0 #000, -2px 0 #000, 0 2px #000, 0 -2px #000, 5px 5px 0 var(--b); }
+  #go:active { color: var(--b); }
+  .home { font: 12px var(--tt); color: var(--r); letter-spacing: .1em; padding: 8px; }
+  a:hover, a:active { background: var(--b); color: #000; }
+  #after { justify-content: flex-end; pointer-events: none; padding-bottom: max(16px, env(safe-area-inset-bottom)); gap: 6px; }
+  #after > * { pointer-events: auto; }
+  #count { font: 11px var(--tt); color: var(--b); letter-spacing: .18em; text-shadow: 1px 1px 0 #000; }
+  #after nav { font: italic 19px var(--sf); color: var(--r2); text-shadow: 1px 1px 0 #000; }
+  #after nav button { font: inherit; color: var(--r); background: none; border: 0; text-decoration: underline; cursor: pointer; padding: 8px 6px; }
+  #after nav button:active, #after nav button:hover { background: var(--b); color: #000; text-decoration: none; }
+  #truthsPage { background: #000; overflow-y: auto; justify-content: flex-start; touch-action: pan-y; }
+  #truthsPage h2 { font: italic 700 40px var(--sf); color: var(--r); margin: 18px 0 0;
+                   text-shadow: 2px 0 #000, -2px 0 #000, 0 2px #000, 0 -2px #000, 4px 4px 0 var(--b); }
+  #truthsCount { font: 10px var(--tt); color: var(--r2); letter-spacing: .2em; }
+  #truthsTable { width: min(560px, 100%); border-collapse: collapse; text-align: left; }
+  #truthsTable td { border: 1px solid var(--b3); padding: 6px 8px; font: italic 15px var(--sf); color: var(--b); }
+  #truthsTable td:first-child { font: 10px var(--tt); color: var(--r2); width: 3.5em; font-style: normal; }
+  #truthsTable tr.unk td:last-child { color: var(--b3); font-style: normal; }
+  #truthsClose { font: italic 18px var(--sf); color: var(--r); background: none; border: 0; text-decoration: underline; padding: 14px; cursor: pointer; }
+</style>
+</head>
+<body>
+<canvas id="c"></canvas>
+
+<div id="start" class="ov">
+  <button id="go">tilt to rise</button>
+  <a class="home" href="https://liveanddie.xyz/">← liveanddie.xyz</a>
+</div>
+
+<div id="after" class="ov" hidden>
+  <div id="count"></div>
+  <nav><button id="again">fly again</button> · <button id="share">share</button> · <button id="tlist">truths</button> · <button id="voice">voice: on</button></nav>
+  <a class="home" href="https://liveanddie.xyz/">← liveanddie.xyz</a>
+</div>
+
+<div id="truthsPage" class="ov" hidden>
+  <h2>TRUTHS</h2>
+  <div id="truthsCount"></div>
+  <table id="truthsTable"></table>
+  <button id="truthsClose">close</button>
+</div>
+
+<script type="module">
+// ============================================================
+// ICARUS (surreal). You don't fly one level: you climb through a chain of scenes, each a strange
+// little web page of its own, hard-cut like clicking a link. Higher = stranger. The sun is always
+// somewhere. Near the top it melts for real; you fall back down through everything you passed;
+// the sea; and the Oracle, somewhere odd, tells you one truth.
+// ============================================================
+const $ = id => document.getElementById(id);
+const cv = $("c"), ctx = cv.getContext("2d");
+let g = ctx;                                   // the context every helper draws into (swapped for the share card)
+const C = { r: "#ff0000", r2: "#aa0000", r3: "#4a0000", b: "#3a3aff", b2: "#2222cc", b3: "#101060", k: "#000" };
+const SF = '"Times New Roman", Times, "Liberation Serif", serif', TT = '"Courier New", Courier, monospace';
+
+// ---------- tuning ----------
+const NS = 10;                 // scenes per flight (from the pool, shuffled)
+const CLIMB = 0.034;           // height / s at full tilt (x the scene's own speed)
+const SINK = 0.006;            // height / s lost holding level
+const MELT_FROM = 0.74;        // height where the melting starts
+const LOW_END = 4;             // seconds back at the bottom that end a flight
+const MELT_TIME = 3.6, FALL_TIME = 7, SEA_TIME = 1.7, DARK_TIME = 1.2;
+const RISE_TIME = 3.4, LETTER_MS = 70;
+const TRUTH_KEY = "icarus.truths.v1", VOICE_KEY = "icarus.voice.v1";
+
+// ---------- screen: CSS pixels, any shape; the composition re-centres every frame ----------
+let W = 0, H = 0, S = 0, CX = 0, CY = 0, DPR = 1;
+function fit() {
+  W = innerWidth || 800; H = innerHeight || 600; S = Math.min(W, H); CX = W / 2; CY = H / 2;
+  let k = Math.min(devicePixelRatio || 1, 2);
+  if (W * H * k * k > 2.6e6) k = Math.sqrt(2.6e6 / (W * H));       // keep the pixel count phone-friendly
+  DPR = k;
+  cv.width = Math.round(W * k); cv.height = Math.round(H * k);
+}
+fit();
+addEventListener("resize", fit);
+if (screen.orientation) screen.orientation.addEventListener("change", () => { fit(); gyro.calibrate = true; });
+addEventListener("orientationchange", () => { setTimeout(fit, 120); gyro.calibrate = true; });
+
+// ---------- little helpers ----------
+const clamp = (v, a, b) => Math.min(b, Math.max(a, v));
+const lerp = (a, b, t) => a + (b - a) * t;
+const smooth = v => v * v * (3 - 2 * v);
+const wrap = (v, m) => ((v % m) + m) % m;
+const rnd = (a, b) => a + Math.random() * (b - a);
+const pick = a => a[(Math.random() * a.length) | 0];
+const hash = n => { const s = Math.sin(n * 127.1 + 311.7) * 43758.5453; return s - Math.floor(s); };
+const shuffle = a => { for (let i = a.length - 1; i > 0; i--) { const j = (Math.random() * (i + 1)) | 0; [a[i], a[j]] = [a[j], a[i]]; } return a; };
+
+// ---------- the copy ----------
+const ADS = [
+  ["HOT SINGLES IN YOUR AREA", "they have been waiting since 2007."], ["WE BUY TEETH", "top dollar. bring your own."],
+  ["BAIL BONDS — 24 HRS", "we come to you."], ["JESUS SAVES", "terms apply."], ["COMBO #4", "burger, fries, dissociative. $6.99"],
+  ["NO CREDIT CHECK", "cash today. 2,000% APR."], ["ANGEL DUST® — FAMILY SIZE", "operators are standing by."],
+  ["YOUR CHILDHOOD — RESTOCKED", "while supplies last."], ["SCRATCH & WIN", "everyone is a winner."],
+  ["YOU ARE THE 1,000,000TH VISITOR", "you have won a feeling."], ["FREEDOM™ — NOW IN RED", "zero down. zero APR. zero."],
+  ["THIS SPACE FOR RENT", "high traffic. low feelings."], ["HE VOTED AGAINST YOUR FEELINGS", "paid for by Americans for America."],
+];
+const FATHER = ["come down.", "I built them for you. not for that.", "not so high.", "the wax won't hold.", "I can see you from here.",
+                "land when you're ready.", "I'm still on the ground.", "don't look at it.", "I made two pairs. why did I make two pairs.",
+                "it's getting late, son.", "your dinner's cold."];
+const WIRE_WORDS = ["COME DOWN", "YOU ARE HERE", "NOBODY IS DRIVING", "STAY", "WE HEAR YOU", "HIGHER", "NO SIGNAL", "IT WAS A RECORDING"];
+const NOTED = ["GOOD.", "INTERESTING.", "WE SAW.", "NOTED.", "DO IT AGAIN.", "WHY?", "WE KNOW.", "AGAIN."];
+
+// ============================================================
+// Truths: truths.json, shuffled without repeats; progress in localStorage
+// ============================================================
+const FALLBACK = { truths: [{ id: "t01", text: "there is no end" }], deep: [], final: { id: "final", text: "ask again." } };
+let truthsData = null;
+async function loadTruths() {
+  if (truthsData) return truthsData;
+  for (const url of ["truths.json", "../truths.json"]) {
+    try {
+      const r = await fetch(url, { cache: "no-cache" });
+      if (!r.ok) continue;
+      const j = await r.json();
+      if (!Array.isArray(j.truths) || !j.truths.length) continue;
+      truthsData = { truths: j.truths, deep: Array.isArray(j.deep) ? j.deep : [], final: j.final || FALLBACK.final };
+      return truthsData;
+    } catch (e) { /* try the next place */ }
+  }
+  truthsData = FALLBACK;
+  return truthsData;
+}
+function loadSeen() {
+  try {
+    const s = JSON.parse(localStorage.getItem(TRUTH_KEY) || "{}");
+    return { seen: Array.isArray(s.seen) ? s.seen : [], ever: Array.isArray(s.ever) ? s.ever : [], cycles: s.cycles | 0 };
+  } catch (e) { return { seen: [], ever: [], cycles: 0 }; }
+}
+function saveSeen(s) { try { localStorage.setItem(TRUTH_KEY, JSON.stringify(s)); } catch (e) { /* private mode */ } }
+// deepOk: the flight reached the melt (or found the hidden room, which always earns one if any are left)
+function pickTruth(deepOk, deepForce) {
+  const d = truthsData || FALLBACK, s = loadSeen();
+  const all = [...d.truths, ...d.deep], total = all.length, ids = new Set(all.map(t => t.id));
+  s.seen = s.seen.filter(id => ids.has(id));
+  const fresh = list => list.filter(t => !s.seen.includes(t.id));
+  const normal = fresh(d.truths), deep = fresh(d.deep);
+  if (!normal.length && !deep.length) {
+    s.seen = []; s.cycles++;
+    if (!s.ever.includes(d.final.id)) s.ever.push(d.final.id);
+    saveSeen(s);
+    return { truth: d.final, learned: total, total, hint: "", final: true };
+  }
+  let truth;
+  if (deepOk && deep.length && (deepForce || !normal.length || Math.random() < 0.5)) truth = pick(deep);
+  else if (normal.length) truth = pick(normal);
+  else {
+    const seenList = all.filter(t => s.seen.includes(t.id));
+    return { truth: pick(seenList.length ? seenList : d.truths), learned: s.seen.length, total, hint: "THE REST ARE CLOSER TO THE SUN", final: false };
+  }
+  s.seen.push(truth.id);
+  if (!s.ever.includes(truth.id)) s.ever.push(truth.id);
+  saveSeen(s);
+  return { truth, learned: s.seen.length, total, hint: "", final: false };
+}
+// a few words out of some truth
+function frag() {
+  const d = truthsData || FALLBACK, t = pick([...d.truths, ...d.deep]).text.split(" ");
+  const n = Math.min(t.length, 2 + ((Math.random() * 2) | 0)), i = (Math.random() * (t.length - n + 1)) | 0;
+  return t.slice(i, i + n).join(" ");
+}
+
+// ============================================================
+// Sound: a drone that climbs with you, power-line hum, a noise channel (rain, static, breath,
+// wind), a sub for the Oracle, and small one-shots. Some scenes are completely silent.
+// ============================================================
+let audio = null;
+function initAudio() {
+  const ac = new (window.AudioContext || window.webkitAudioContext)();
+  const G = v => { const x = ac.createGain(); x.gain.value = v; return x; };
+  const O = (type, f) => { const o = ac.createOscillator(); o.type = type; o.frequency.value = f; return o; };
+  const F = (type, f, q = 0.7) => { const x = ac.createBiquadFilter(); x.type = type; x.frequency.value = f; x.Q.value = q; return x; };
+  const master = G(0.7), comp = ac.createDynamicsCompressor();
+  master.connect(comp).connect(ac.destination);
+  const o1 = O("triangle", 55), o2 = O("sawtooth", 55.3), lp = F("lowpass", 400), dg = G(0), o2g = G(0.25);
+  o1.connect(lp); o2.connect(o2g).connect(lp); lp.connect(dg).connect(master);
+  const buf = ac.createBuffer(1, ac.sampleRate * 2, ac.sampleRate), d = buf.getChannelData(0);
+  for (let i = 0; i < d.length; i++) d[i] = Math.random() * 2 - 1;
+  const ns = ac.createBufferSource(); ns.buffer = buf; ns.loop = true;
+  const bp = F("bandpass", 800, 0.7), ng = G(0);
+  ns.connect(bp).connect(ng).connect(master);
+  const h1 = O("square", 60), h2 = O("sawtooth", 120), hf = F("bandpass", 180, 2), hg = G(0);
+  h1.connect(hf); h2.connect(hf); hf.connect(hg).connect(master);
+  const s1 = O("sine", 41.2), s2 = O("sine", 61.7), sg = G(0);
+  s1.connect(sg); s2.connect(sg); sg.connect(master);
+  for (const o of [o1, o2, h1, h2, s1, s2]) o.start();
+  ns.start();
+  return { ac, master, o1, o2, lp, dg, bp, ng, h1, hf, hg, sg, buf };
+}
+const glide = (p, v, tc = 0.3) => { if (audio) p.setTargetAtTime(v, audio.ac.currentTime, tc); };
+let ambNow = {};
+// scene ambience: { drone, hum, noise, nf (noise filter Hz) }
+function setAmb(a, tc = 0.25) {
+  if (!audio) return;
+  ambNow = a || {};
+  glide(audio.hg.gain, (ambNow.hum || 0) * 0.5, tc);
+  glide(audio.ng.gain, (ambNow.noise || 0) * 0.5, tc);
+  glide(audio.bp.frequency, ambNow.nf || 800, tc);
+}
+function updateAudio() {
+  if (!audio || mode !== "fly") return;
+  const f = 55 * Math.pow(2, h * 2.2);
+  glide(audio.o1.frequency, f, 0.2); glide(audio.o2.frequency, f * (1.004 + melt * 0.06), 0.2);
+  glide(audio.lp.frequency, 300 + 2600 * h * h, 0.2);
+  glide(audio.dg.gain, (ambNow.drone ?? 0.2) * 0.35 * (1 + melt), 0.25);
+  glide(audio.h1.frequency, 60 * (1 + 0.05 * melt), 0.4);
+}
+function tone(type, f0, f1, dur, gain, delay = 0) {
+  if (!audio) return;
+  const a = audio, t = a.ac.currentTime + delay, o = a.ac.createOscillator(), gg = a.ac.createGain();
+  o.type = type; o.frequency.setValueAtTime(f0, t);
+  if (f1 !== f0) o.frequency.exponentialRampToValueAtTime(Math.max(20, f1), t + dur);
+  gg.gain.setValueAtTime(0.0001, t); gg.gain.exponentialRampToValueAtTime(gain, t + 0.01); gg.gain.exponentialRampToValueAtTime(0.0001, t + dur);
+  o.connect(gg).connect(a.master); o.start(t); o.stop(t + dur + 0.05);
+}
+function hiss(dur, gain, f = 2000, delay = 0) {
+  if (!audio) return;
+  const a = audio, t = a.ac.currentTime + delay, s = a.ac.createBufferSource(), fl = a.ac.createBiquadFilter(), gg = a.ac.createGain();
+  s.buffer = a.buf; fl.type = "bandpass"; fl.frequency.value = f; fl.Q.value = 0.8;
+  gg.gain.setValueAtTime(gain, t); gg.gain.exponentialRampToValueAtTime(0.0001, t + dur);
+  s.connect(fl).connect(gg).connect(a.master); s.start(t, Math.random()); s.stop(t + dur + 0.05);
+}
+const click = () => hiss(0.04, 0.25, 3500);
+const blip = () => { tone("square", 880, 880, 0.06, 0.05); tone("square", 1320, 1320, 0.06, 0.04, 0.06); };
+function ring() { for (let i = 0; i < 6; i++) tone("square", i % 2 ? 480 : 440, i % 2 ? 480 : 440, 0.05, 0.04, i * 0.05); }
+
+// ---------- the voice ----------
+let voiceOn = true, ttsVoice = null;
+try { voiceOn = localStorage.getItem(VOICE_KEY) !== "0"; } catch (e) { /* default on */ }
+function pickVoice() {
+  if (!("speechSynthesis" in window)) return null;
+  const vs = speechSynthesis.getVoices();
+  if (!vs.length) return null;
+  const en = vs.filter(v => /^en(-|_|$)/i.test(v.lang)), pool = en.length ? en : vs;
+  for (const re of [/google us english/i, /samantha/i, /daniel/i, /alex/i, /microsoft (david|mark|zira)/i]) { const v = pool.find(v => re.test(v.name)); if (v) return v; }
+  return pool.find(v => v.default) || pool[0];
+}
+if ("speechSynthesis" in window) speechSynthesis.onvoiceschanged = () => { ttsVoice = pickVoice(); };
+function speak(text, pitch = 0.6, rate = 0.8) {
+  if (!voiceOn || !("speechSynthesis" in window)) return;
+  try {
+    speechSynthesis.cancel();
+    const u = new SpeechSynthesisUtterance(text);
+    ttsVoice = ttsVoice || pickVoice();
+    if (ttsVoice) { u.voice = ttsVoice; u.lang = ttsVoice.lang; }
+    u.pitch = pitch; u.rate = rate;
+    speechSynthesis.speak(u);
+  } catch (e) { /* no voice */ }
+}
+function primeSpeech() {
+  if (!("speechSynthesis" in window)) return;
+  try { const u = new SpeechSynthesisUtterance(" "); u.volume = 0; speechSynthesis.speak(u); ttsVoice = pickVoice(); } catch (e) { /* no voice */ }
+}
+
+// ============================================================
+// Input: the phone's tilt (either orientation), or dragging a finger, or the arrow keys
+// ============================================================
+const gyro = { beta: 0, gamma: 0, beta0: 0, gamma0: 0, calibrate: true, seen: false };
+function onOrientation(e) {
+  if (e.beta == null || e.gamma == null) return;
+  const b = (e.beta * Math.PI) / 180, gm = (e.gamma * Math.PI) / 180;
+  const dx = -Math.cos(b) * Math.sin(gm), dy = Math.sin(b), dz = Math.cos(b) * Math.cos(gm);
+  const t = ((screen.orientation?.angle ?? window.orientation ?? 0) * Math.PI) / 180;
+  const ux = dx * Math.cos(t) - dy * Math.sin(t), uy = dx * Math.sin(t) + dy * Math.cos(t);
+  const pitch = (Math.atan2(uy, dz) * 180) / Math.PI, roll = (-Math.asin(clamp(ux, -1, 1)) * 180) / Math.PI;
+  gyro.beta = pitch; gyro.gamma = roll; gyro.seen = true;
+  if (gyro.calibrate) { gyro.beta0 = pitch; gyro.gamma0 = roll; gyro.calibrate = false; }
+}
+async function requestMotion() {
+  try {
+    const DOE = window.DeviceOrientationEvent;
+    if (DOE && typeof DOE.requestPermission === "function") await DOE.requestPermission();
+  } catch (e) { /* no motion: drag still works */ }
+  addEventListener("deviceorientation", onOrientation);
+}
+const shape = (deg, range) => Math.sign(deg) * clamp((Math.abs(deg) - 3) / (range - 3), 0, 1);
+const keys = new Set();
+addEventListener("keydown", e => keys.add(e.key));
+addEventListener("keyup", e => keys.delete(e.key));
+const drag = { p: 0, r: 0 };
+let ptr = null;
+cv.addEventListener("pointerdown", e => { ptr = { x0: e.clientX, y0: e.clientY, t0: performance.now(), moved: false }; });
+cv.addEventListener("pointermove", e => {
+  if (!ptr) return;
+  const dx = e.clientX - ptr.x0, dy = e.clientY - ptr.y0;
+  if (Math.hypot(dx, dy) > 12) ptr.moved = true;
+  if (ptr.moved) { drag.p = clamp(-dy / (H * 0.22), -1, 1); drag.r = clamp(dx / (W * 0.25), -1, 1); }
+});
+const endPtr = e => {
+  if (ptr && !ptr.moved && performance.now() - ptr.t0 < 450) onTap(e.clientX, e.clientY);
+  ptr = null; drag.p = 0; drag.r = 0;
+};
+cv.addEventListener("pointerup", endPtr);
+cv.addEventListener("pointercancel", () => { ptr = null; drag.p = 0; drag.r = 0; });
+
+// E: what every scene can read this frame
+const E = { pitch: 0, roll: 0, lx: 0, ly: 0, vel: 0, h: 0, melt: 0, t: 0 };
+let pitchIn = 0, rollIn = 0;
+const hist = [];                                   // [time, roll, pitch]: for the late reflection
+let lastAct = { text: "YOU ARRIVED.", t: 0 }, actState = { side: 0, climb: 0, idle: 0 };
+function noteAct(text) { lastAct = { text: text + " " + pick(NOTED), t: performance.now() }; }
+function readInput(now, dt) {
+  let p = 0, r = 0;
+  if (gyro.seen && !gyro.calibrate) {
+    let db = gyro.beta - gyro.beta0;
+    if (db > 180) db -= 360; else if (db < -180) db += 360;
+    p = shape(db, 28); r = shape(gyro.gamma - gyro.gamma0, 28);
+  }
+  p += drag.p; r += drag.r;
+  if (keys.has("ArrowUp") || keys.has("w")) p = 1;
+  if (keys.has("ArrowDown") || keys.has("s")) p = -1;
+  if (keys.has("ArrowLeft") || keys.has("a")) r = -1;
+  if (keys.has("ArrowRight") || keys.has("d")) r = 1;
+  pitchIn = clamp(p, -1, 1); rollIn = clamp(r, -1, 1);
+  const k = 1 - Math.exp(-dt / 0.15);
+  E.pitch += (pitchIn - E.pitch) * k; E.roll += (rollIn - E.roll) * k;
+  E.lx = -E.roll * S * 0.14; E.ly = E.pitch * S * 0.07;
+  hist.push([now, E.roll, E.pitch]);
+  while (hist.length > 2 && hist[0][0] < now - 1500) hist.shift();
+  // what you did, for the billboard that watches
+  const side = rollIn > 0.5 ? 1 : rollIn < -0.5 ? -1 : 0;
+  if (side && side !== actState.side) noteAct(side < 0 ? "YOU TILTED LEFT." : "YOU TILTED RIGHT.");
+  actState.side = side;
+  actState.climb = pitchIn > 0.6 ? actState.climb + dt : 0;
+  if (actState.climb > 1.2) { noteAct("YOU CLIMBED."); actState.climb = -99; }
+  if (pitchIn < -0.5 && lastAct.text.indexOf("DIVED") < 0) noteAct("YOU DIVED.");
+  actState.idle = Math.abs(pitchIn) + Math.abs(rollIn) < 0.15 ? actState.idle + dt : 0;
+  if (actState.idle > 2.5) { noteAct("YOU STOPPED."); actState.idle = -99; }
+}
+function lateInput(delay) {                        // E.roll / E.pitch as they were `delay` ms ago
+  const t = performance.now() - delay;
+  for (let i = hist.length - 1; i >= 0; i--) if (hist[i][0] <= t) return hist[i];
+  return hist[0] || [0, 0, 0];
+}
+
+// ============================================================
+// Drawing helpers: the site's outlined serif, tiled GIF-ish patterns, the sun, crayon lines
+// ============================================================
+function bg(col = "#000") { g.fillStyle = col; g.fillRect(0, 0, W, H); }
+function line(x1, y1, x2, y2, col, lw = 1) { g.strokeStyle = col; g.lineWidth = lw; g.beginPath(); g.moveTo(x1, y1); g.lineTo(x2, y2); g.stroke(); }
+// The site's type: bold italic serif, hard black outline, blue offset
+function olText(str, x, y, size, o = {}) {
+  g.save();
+  g.font = `${o.italic === false ? "" : "italic "}${o.weight ?? 700} ${size}px ${o.font || SF}`;
+  g.textAlign = o.align || "center"; g.textBaseline = o.base || "middle"; g.lineJoin = "round";
+  if (o.maxW) { const w = g.measureText(str).width; if (w > o.maxW) { size *= o.maxW / w; g.font = `${o.italic === false ? "" : "italic "}${o.weight ?? 700} ${size}px ${o.font || SF}`; } }
+  if (o.shadow !== null) { g.fillStyle = o.shadow || C.b; g.fillText(str, x + size * 0.07, y + size * 0.07); }
+  g.lineWidth = Math.max(2, size * 0.12); g.strokeStyle = "#000"; g.strokeText(str, x, y);
+  g.fillStyle = o.fill || C.r; g.fillText(str, x, y);
+  g.restore();
+}
+function plain(str, x, y, size, col, o = {}) {
+  g.save();
+  g.font = `${o.style || ""} ${size}px ${o.font || TT}`; g.textAlign = o.align || "center"; g.textBaseline = o.base || "middle";
+  g.fillStyle = col; g.fillText(str, x, y);
+  g.restore();
+}
+function wrapText(str, maxW) {
+  const out = []; let cur = "";
+  for (const w of str.split(" ")) { const t = cur ? cur + " " + w : w; if (cur && g.measureText(t).width > maxW) { out.push(cur); cur = w; } else cur = t; }
+  if (cur) out.push(cur);
+  return out;
+}
+// Tiled patterns, drawn once into tiny canvases (they tile like old GIF backgrounds)
+const PAT = new Map();
+function pat(kind) {
+  const key = kind + (g === ctx ? "" : "#card");
+  if (PAT.has(key)) return PAT.get(key);
+  const n = { bedspread: 40, lino: 32, wallpaper: 36, stars: 48, ruled: 26, pool: 24, carpet: 12, suns: 56, under: 24, static: 64 }[kind] || 32;
+  const c = document.createElement("canvas"); c.width = c.height = n;
+  const x = c.getContext("2d");
+  x.fillStyle = "#000"; x.fillRect(0, 0, n, n);
+  if (kind === "bedspread") {
+    x.strokeStyle = C.r2; x.lineWidth = 2; x.beginPath(); x.moveTo(n / 2, 2); x.lineTo(n - 2, n / 2); x.lineTo(n / 2, n - 2); x.lineTo(2, n / 2); x.closePath(); x.stroke();
+    x.fillStyle = C.b; x.fillRect(n / 2 - 3, n / 2 - 3, 6, 6); x.fillStyle = C.r3; x.fillRect(0, 0, 4, 4);
+  } else if (kind === "lino") {
+    x.fillStyle = C.b3; x.fillRect(0, 0, n / 2, n / 2); x.fillRect(n / 2, n / 2, n / 2, n / 2);
+    x.fillStyle = C.r3; for (let i = 0; i < 9; i++) x.fillRect((hash(i) * n) | 0, (hash(i + 9) * n) | 0, 2, 1);
+  } else if (kind === "wallpaper") {
+    x.fillStyle = C.r3; x.fillRect(0, 0, 6, n); x.fillRect(n / 2, 0, 2, n);
+    x.fillStyle = C.b2; for (const [a, b] of [[0, -5], [5, 0], [0, 5], [-5, 0]]) { x.beginPath(); x.arc(n * 0.75 + a * 0.6, n / 2 + b * 0.6, 3, 0, 7); x.fill(); }
+    x.fillStyle = C.r; x.fillRect(n * 0.75 - 1, n / 2 - 1, 2, 2);
+  } else if (kind === "stars") {
+    for (let i = 0; i < 7; i++) { x.fillStyle = i % 2 ? C.b : C.r2; x.fillRect((hash(i * 3) * n) | 0, (hash(i * 7) * n) | 0, 1 + (i % 2), 1 + (i % 2)); }
+    x.fillStyle = C.b; x.fillRect(n / 2 - 1, n / 2 - 4, 2, 8); x.fillRect(n / 2 - 4, n / 2 - 1, 8, 2);
+  } else if (kind === "ruled") {
+    x.fillStyle = "#05051a"; x.fillRect(0, 0, n, n); x.fillStyle = C.b3; x.fillRect(0, n - 2, n, 1);
+  } else if (kind === "pool") {
+    x.fillStyle = "#07073a"; x.fillRect(0, 0, n, n); x.fillStyle = C.b2; x.fillRect(0, 0, n, 1); x.fillRect(0, 0, 1, n);
+  } else if (kind === "carpet") {
+    x.fillStyle = "#0a0a30"; x.fillRect(0, 0, n, n);
+    for (let i = 0; i < 6; i++) { x.fillStyle = i % 3 ? C.b3 : C.r3; x.fillRect((hash(i * 5) * n) | 0, (hash(i * 11) * n) | 0, 2, 2); }
+  } else if (kind === "suns") {
+    x.fillStyle = C.r; x.beginPath(); x.arc(n / 2, n / 2, 8, 0, 7); x.fill();
+    x.strokeStyle = C.r2; x.lineWidth = 2;
+    for (let i = 0; i < 8; i++) { const a = (i / 8) * Math.PI * 2; x.beginPath(); x.moveTo(n / 2 + Math.cos(a) * 12, n / 2 + Math.sin(a) * 12); x.lineTo(n / 2 + Math.cos(a) * 18, n / 2 + Math.sin(a) * 18); x.stroke(); }
+    x.fillStyle = C.b3; x.fillRect(0, 0, 3, 3);
+  } else if (kind === "under") {
+    x.fillStyle = C.r; for (let i = -n; i < n * 2; i += 12) { x.beginPath(); x.moveTo(i, 0); x.lineTo(i + 6, 0); x.lineTo(i + 6 - n, n); x.lineTo(i - n, n); x.closePath(); x.fill(); }
+  } else if (kind === "static") {
+    for (let y = 0; y < n; y += 2) for (let xx = 0; xx < n; xx += 2) { const v = Math.random(); x.fillStyle = v < 0.5 ? "#000" : v < 0.75 ? C.b3 : v < 0.92 ? C.r3 : C.b; x.fillRect(xx, y, 2, 2); }
+  }
+  const p = { p: g.createPattern(c, "repeat"), n };
+  PAT.set(key, p);
+  return p;
+}
+function fillPat(kind, ox, oy, x = 0, y = 0, w = W, h = H, alpha = 1) {
+  const P = pat(kind);
+  g.save();
+  g.beginPath(); g.rect(x, y, w, h); g.clip();
+  g.imageSmoothingEnabled = false;
+  g.globalAlpha *= alpha;
+  g.translate(wrap(ox, P.n), wrap(oy, P.n));
+  g.fillStyle = P.p; g.fillRect(x - P.n * 2, y - P.n * 2, w + P.n * 4, h + P.n * 4);
+  g.restore();
+}
+// The sun. Styles: "wire" (a turning wire globe), "disc" (the site's red with its blue offset), "gif" (a
+// spinning 4-frame GIF sun), "child" (crayon, yellow and orange: the one time it's not red). Near the
+// top of the flight it melts: it sags and drips, whatever style it's in.
+function sun(x, y, r, style = "wire") {
+  const t = E.t, m = E.melt;
+  if (r < 0.5) return;
+  g.save();
+  g.lineJoin = "round"; g.lineCap = "round";
+  const sag = 1 + m * 0.7;                                     // the lower half sags
+  const body = () => { g.beginPath(); g.ellipse(x, y, r * (1 + m * 0.12), r, 0, Math.PI, 0); g.ellipse(x, y, r * (1 + m * 0.12), r * sag, 0, 0, Math.PI); g.closePath(); };
+  if (style === "child") {
+    const j = n => (hash(n + Math.floor(t * 6) * 13) - 0.5) * r * 0.08;
+    g.strokeStyle = "#ff8c00"; g.lineWidth = Math.max(2, r * 0.07);
+    for (let i = 0; i < 10; i++) { const a = (i / 10) * Math.PI * 2 + 0.2; g.beginPath(); g.moveTo(x + Math.cos(a) * r * 1.2 + j(i), y + Math.sin(a) * r * 1.2 + j(i + 1)); g.lineTo(x + Math.cos(a) * r * 1.75 + j(i + 2), y + Math.sin(a) * r * 1.75 + j(i + 3)); g.stroke(); }
+    g.fillStyle = "#ffd200"; g.beginPath();
+    for (let i = 0; i <= 14; i++) { const a = (i / 14) * Math.PI * 2, rr = r * (1 + (hash(i + Math.floor(t * 6)) - 0.5) * 0.12) * (a > 0 && a < Math.PI ? sag : 1); g.lineTo(x + Math.cos(a) * rr, y + Math.sin(a) * rr); }
+    g.fill(); g.strokeStyle = "#ff5a00"; g.lineWidth = Math.max(2, r * 0.06); g.stroke();
+    g.fillStyle = "#000"; g.fillRect(x - r * 0.35, y - r * 0.25, r * 0.12, r * 0.12); g.fillRect(x + r * 0.2, y - r * 0.25, r * 0.12, r * 0.12);
+    g.beginPath(); g.arc(x, y + r * 0.1, r * 0.4, 0.2, Math.PI - 0.2); g.stroke();
+  } else if (style === "disc" || style === "gif") {
+    if (style === "gif") {
+      const fr = Math.floor(t * 4) % 4;
+      g.strokeStyle = C.r2; g.lineWidth = Math.max(2, r * 0.12);
+      for (let i = 0; i < 8; i++) { const a = (i / 8) * Math.PI * 2 + (fr * Math.PI) / 16; g.beginPath(); g.moveTo(x + Math.cos(a) * r * 1.25, y + Math.sin(a) * r * 1.25); g.lineTo(x + Math.cos(a) * r * 1.7, y + Math.sin(a) * r * 1.7); g.stroke(); }
+    }
+    g.save(); g.translate(r * 0.08, r * 0.08); body(); g.fillStyle = C.b; g.fill(); g.restore();
+    body(); g.fillStyle = C.r; g.fill(); g.lineWidth = Math.max(1.5, r * 0.05); g.strokeStyle = "#000"; g.stroke();
+  } else {
+    g.strokeStyle = C.r; g.lineWidth = Math.max(1, r * 0.035);
+    body(); g.fillStyle = "#000"; g.fill(); g.stroke();
+    for (const a of [-0.9, -0.45, 0, 0.45, 0.9]) {                  // latitudes
+      const yy = y + Math.sin(a) * r * (a > 0 ? sag : 1), rx = Math.cos(a) * r;
+      g.beginPath(); g.ellipse(x, yy, rx, rx * 0.22, 0, 0, Math.PI * 2); g.stroke();
+    }
+    for (let k = 0; k < 4; k++) {                                    // longitudes, turning
+      const ph = t * 0.6 + (k * Math.PI) / 4, rx = Math.abs(Math.cos(ph)) * r;
+      g.beginPath(); g.ellipse(x, y, rx, r, 0, Math.PI, 0); g.ellipse(x, y, rx, r * sag, 0, 0, Math.PI); g.stroke();
+    }
+  }
+  if (m > 0.02) {                                                    // drips off the lower rim
+    const col = style === "child" ? "#ff8c00" : C.r;
+    g.strokeStyle = col; g.fillStyle = col;
+    for (let k = 0; k < 7; k++) {
+      const a = Math.PI * (0.15 + (0.7 * k) / 6), px = x + Math.cos(a) * r, py = y + Math.sin(a) * r * sag;
+      const len = r * m * (0.3 + 1.5 * hash(k + 3)) * (0.8 + 0.2 * Math.sin(t * 2 + k));
+      g.lineWidth = Math.max(1, r * 0.09 * (0.6 + hash(k))); g.beginPath(); g.moveTo(px, py); g.lineTo(px, py + len); g.stroke();
+      g.beginPath(); g.arc(px, py + len, g.lineWidth * 0.7, 0, 7); g.fill();
+    }
+  }
+  g.restore();
+}
+// A wobbly crayon line through points (it boils, six times a second)
+function crayon(pts, col, w = 3, seed = 0) {
+  const f = Math.floor(E.t * 6);
+  g.strokeStyle = col; g.lineWidth = w; g.lineCap = "round"; g.lineJoin = "round";
+  for (let pass = 0; pass < 2; pass++) {
+    g.beginPath();
+    pts.forEach(([x, y], i) => { const jx = (hash(seed + i * 7 + f * 31 + pass) - 0.5) * w * 1.4, jy = (hash(seed + i * 11 + f * 17 + pass) - 0.5) * w * 1.4; i ? g.lineTo(x + jx, y + jy) : g.moveTo(x + jx, y + jy); });
+    g.globalAlpha = pass ? 0.5 : 1; g.stroke();
+  }
+  g.globalAlpha = 1;
+}
+function rrect(x, y, w, h, r) { g.beginPath(); if (g.roundRect) g.roundRect(x, y, w, h, r); else g.rect(x, y, w, h); }
+function box(x, y, w, h, fill = "#000", stroke = C.r, lw = 2) { g.fillStyle = fill; g.fillRect(x, y, w, h); g.strokeStyle = stroke; g.lineWidth = lw; g.strokeRect(x, y, w, h); }
+function cloud(x, y, w, col = C.b) {
+  g.beginPath();
+  const bumps = [[-0.35, 0.05, 0.22], [-0.12, -0.12, 0.28], [0.15, -0.08, 0.25], [0.36, 0.06, 0.2], [0, 0.1, 0.3]];
+  for (const [dx, dy, r] of bumps) { g.moveTo(x + dx * w + r * w, y + dy * w); g.arc(x + dx * w, y + dy * w, r * w, 0, Math.PI * 2); }
+  g.fillStyle = "#000"; g.fill(); g.strokeStyle = col; g.lineWidth = 2; g.stroke();
+  g.fillStyle = "#000"; g.fillRect(x - w * 0.6, y + w * 0.12, w * 1.2, w * 0.3);
+  line(x - w * 0.55, y + w * 0.12, x + w * 0.55, y + w * 0.12, col, 2);
+}
+
+// ============================================================
+// THE SCENES. Each: speed (how fast you climb through it), amb (its sound; {} = silence),
+// init(s), draw(s, t, dt), tap(s, x, y, t) → true if something there was hit.
+// Sizes come from W, H and S every frame, so they re-compose for portrait or landscape.
+// ============================================================
+const SCENES = [
+// ---- a field of poles; hold still and look straight, and the wires spell something ----
+{ id: "poles", speed: 0.8, amb: { hum: 0.3, drone: 0.15 },
+  init(s) { s.word = pick(WIRE_WORDS); s.steady = 0; },
+  draw(s, t, dt) {
+    bg();
+    const hy = H * 0.44 + E.ly, f = S * 0.8, cam = 2.2;
+    const P = (x, y, z) => [CX + E.lx + (x * f) / z, hy + ((cam - y) * f) / z];
+    sun(CX + E.lx * 0.3 + W * 0.3, hy - S * 0.25, S * 0.04, "wire");
+    line(0, hy, W, hy, C.r3, 1);
+    s.steady = Math.abs(E.roll) < 0.15 && Math.abs(E.pitch) < 0.35 ? s.steady + dt : 0;
+    const k = smooth(clamp((s.steady - 0.8) / 1.2, 0, 1));
+    for (let row = 4; row >= 0; row--) {
+      const z = 6 + row * 7, n = 9, col = row < 2 ? C.r : C.r2, lw = Math.max(1, (S / 160) / (1 + row));
+      const tops = [];
+      for (let i = 0; i < n; i++) {
+        const x = (i - (n - 1) / 2) * 6 + (row % 2) * 3, b = P(x, 0, z), tp = P(x, 5, z), a1 = P(x - 1, 4.6, z), a2 = P(x + 1, 4.6, z);
+        line(b[0], b[1], tp[0], tp[1], col, lw); line(a1[0], a1[1], a2[0], a2[1], col, lw);
+        tops.push([P(x - 0.9, 4.6, z), P(x, 4.6, z), P(x + 0.9, 4.6, z)]);
+      }
+      g.strokeStyle = col; g.lineWidth = 1;
+      for (let w = 0; w < 3; w++) {
+        g.beginPath();
+        for (let i = 0; i + 1 < tops.length; i++) {
+          const A = tops[i][w], B = tops[i + 1][w], sag = (1 - k) * (0.6 * f) / z;
+          g.moveTo(A[0], A[1]); g.quadraticCurveTo((A[0] + B[0]) / 2, (A[1] + B[1]) / 2 + sag * 2, B[0], B[1]);
+        }
+        g.stroke();
+      }
+      if (row === 0 && k > 0) {                       // the word, bent out of wire
+        g.save(); g.globalAlpha = k;
+        g.font = `italic 700 ${S * 0.13}px ${SF}`; g.textAlign = "center"; g.textBaseline = "top";
+        g.lineWidth = 1.5; g.strokeStyle = C.r; g.strokeText(s.word, CX + E.lx, tops[4][1][1] + 6, W * 0.92);
+        g.restore();
+      }
+    }
+  } },
+
+// ---- a billboard that shows what you just did ----
+{ id: "watch", speed: 1, amb: { drone: 0.2, hum: 0.12 },
+  init(s) { s.msg = "YOU ARRIVED. GOOD."; s.at = 0; s.rect = null; },
+  draw(s, t) {
+    bg();
+    const hy = H * 0.72 + E.ly * 0.5;
+    sun(CX + E.lx * 0.5 + S * 0.18, hy - S * 0.42, S * 0.22, "disc");
+    line(0, hy, W, hy, C.r2, 1);
+    for (let i = 0; i < 12; i++) { const x = ((i / 11) * W * 1.2 - W * 0.1 + E.lx * 0.2) | 0; line(x, hy, x, hy - S * 0.04, C.r3, 1); }
+    if (lastAct.t > s.at) { s.at = lastAct.t; s.msg = lastAct.text; click(); }
+    const bw = Math.min(W * 0.9, S * 1.25), bh = bw * 0.42, bx = CX - bw / 2 + E.lx * 0.6, by = hy - bh - S * 0.2;
+    for (const u of [0.25, 0.75]) line(bx + bw * u, by + bh, bx + bw * u, hy, C.r2, Math.max(2, S * 0.012));
+    box(bx, by, bw, bh, "#000", C.r, 3);
+    g.save(); g.beginPath(); g.rect(bx, by, bw, bh); g.clip();
+    const words = s.msg.split(". "), size = bh * 0.22;
+    olText(words[0].replace(/\.$/, "") + ".", bx + bw / 2, by + bh * 0.38, size, { maxW: bw * 0.9 });
+    if (words[1]) olText(words[1], bx + bw / 2, by + bh * 0.72, size * 0.8, { fill: C.b, shadow: C.r3, maxW: bw * 0.9 });
+    g.restore();
+    s.rect = [bx, by, bw, bh];
+  },
+  tap(s, x, y) { const r = s.rect; if (r && x > r[0] && x < r[0] + r[2] && y > r[1] && y < r[1] + r[3]) { noteAct("YOU TOUCHED IT."); return true; } return false; } },
+
+// ---- the sky is a tiled pattern, scrolling the wrong way ----
+{ id: "wallpaper", speed: 1.1, amb: { drone: 0.25 },
+  init(s) { s.kind = pick(["bedspread", "lino", "wallpaper", "suns"]); s.oy = 0; },
+  draw(s, t, dt) {
+    s.oy -= dt * (40 + 140 * E.h) * (0.5 + Math.max(0, E.pitch));     // you rise; it rises faster
+    const hy = H * 0.78 + E.ly;
+    fillPat(s.kind, E.lx * 2 + t * 9, s.oy, 0, 0, W, hy);
+    g.fillStyle = "#000"; g.fillRect(0, hy, W, H - hy);
+    line(0, hy, W, hy, C.r, 2);
+    for (let i = 0; i < 9; i++) { const x = CX + E.lx + (i - 4) * S * 0.16, ph = S * 0.1; line(x, hy, x, hy - ph, C.r2, 2); line(x - S * 0.02, hy - ph * 0.9, x + S * 0.02, hy - ph * 0.9, C.r2, 2); }
+    if (s.kind !== "suns") {                       // a hole cut in the ceiling, with the sun in it
+      const sx = CX + E.lx * 0.4 - S * 0.25, sy = H * 0.28, r = S * 0.11;
+      g.save(); g.beginPath(); g.arc(sx, sy, r * 1.35, 0, 7); g.fillStyle = "#000"; g.fill(); g.strokeStyle = C.b; g.lineWidth = 3; g.stroke(); g.restore();
+      sun(sx, sy, r, "wire");
+    }
+  },
+  tap(s) { s.kind = pick(["bedspread", "lino", "wallpaper", "suns"].filter(k => k !== s.kind)); blip(); return true; } },
+
+// ---- one office chair, floating, following you ----
+{ id: "chair", speed: 0.6, amb: {},
+  init(s) { s.x = 0.5; s.y = 0.55; s.spin = 0; s.va = 0.4; },
+  draw(s, t, dt) {
+    bg();
+    fillPat("carpet", E.lx * 0.5, t * 4, 0, H * 0.62 + E.ly, W, H, 0.6);
+    sun(W * 0.12 + E.lx * 0.2, H * 0.16, S * 0.035, "disc");
+    s.x += (0.5 - E.roll * 0.3 - s.x) * dt * 0.6; s.y += (0.5 - E.pitch * 0.15 - s.y) * dt * 0.6;
+    s.spin += dt * s.va; s.va += (0.4 - s.va) * dt * 0.8;
+    const cx = s.x * W, cy = s.y * H + Math.sin(t * 0.9) * S * 0.015, sc = S * 0.16, ca = Math.cos(s.spin), sa = Math.sin(s.spin);
+    const P = (x, y, z) => { const xr = x * ca - z * sa, zr = x * sa + z * ca, k = 1 / (1 + zr * 0.12); return [cx + xr * sc * k, cy - y * sc * k]; };
+    const L = (a, b, col = C.b, lw = 2) => { const p = P(...a), q = P(...b); line(p[0], p[1], q[0], q[1], col, lw); };
+    const sq = (y, w, d, z0 = 0) => [[-w, y, -d + z0], [w, y, -d + z0], [w, y, d + z0], [-w, y, d + z0]];
+    const seat = sq(0, 1, 1);
+    g.beginPath(); seat.forEach((p, i) => { const q = P(...p); i ? g.lineTo(q[0], q[1]) : g.moveTo(q[0], q[1]); }); g.closePath(); g.fillStyle = "#000"; g.fill(); g.strokeStyle = C.b; g.lineWidth = 2; g.stroke();
+    const back = [[-0.9, 0.3, -1.1], [0.9, 0.3, -1.1], [0.9, 2.1, -1.25], [-0.9, 2.1, -1.25]];
+    g.beginPath(); back.forEach((p, i) => { const q = P(...p); i ? g.lineTo(q[0], q[1]) : g.moveTo(q[0], q[1]); }); g.closePath(); g.fill(); g.stroke();
+    L([0, 0, 0], [0, -1.3, 0], C.r, 3); L([-0.4, 0.15, -1.05], [-0.4, 0, -0.9]); L([0.4, 0.15, -1.05], [0.4, 0, -0.9]);
+    for (let i = 0; i < 5; i++) { const a = (i / 5) * Math.PI * 2, e = [Math.cos(a) * 1.3, -1.5, Math.sin(a) * 1.3]; L([0, -1.3, 0], e, C.r, 2); const q = P(...e); g.beginPath(); g.arc(q[0], q[1] + 3, Math.max(2, sc * 0.05), 0, 7); g.strokeStyle = C.b; g.stroke(); }
+    s.hit = [cx, cy, sc * 1.6];
+  },
+  tap(s, x, y) { const [cx, cy, r] = s.hit || [0, 0, 0]; if (Math.hypot(x - cx, y - cy) < r) { s.va = 14; tone("sawtooth", 1400, 900, 0.25, 0.03); return true; } return false; } },
+
+// ---- a giant mouth on the horizon: climb and it opens, dive and it closes ----
+{ id: "mouth", speed: 0.9, amb: { noise: 0.2, nf: 300, drone: 0.2 },
+  init(s) { s.o = 0; s.rect = null; },
+  draw(s, t, dt) {
+    bg();
+    const hy = H * 0.6 + E.ly, mw = Math.min(W * 0.9, S * 1.3), x0 = CX + E.lx * 0.5;
+    const want = clamp(E.vel * 30, 0, 1);
+    s.o += (want - s.o) * (1 - Math.exp(-dt / 0.35));
+    if (audio && mode === "fly") glide(audio.ng.gain, 0.04 + s.o * 0.18, 0.1);
+    const lh = mw * 0.09, open = s.o * mw * 0.28;
+    const upper = (yy, e) => { g.moveTo(x0 - mw / 2, yy); g.bezierCurveTo(x0 - mw * 0.3, yy - lh * 1.4 - e, x0 - mw * 0.08, yy - lh * 1.1 - e, x0, yy - lh * 0.7 - e); g.bezierCurveTo(x0 + mw * 0.08, yy - lh * 1.1 - e, x0 + mw * 0.3, yy - lh * 1.4 - e, x0 + mw / 2, yy); };
+    // inside: dark, teeth, and far back the sun
+    g.beginPath(); g.moveTo(x0 - mw / 2, hy); g.bezierCurveTo(x0 - mw * 0.25, hy - open * 0.5, x0 + mw * 0.25, hy - open * 0.5, x0 + mw / 2, hy);
+    g.bezierCurveTo(x0 + mw * 0.25, hy + open, x0 - mw * 0.25, hy + open, x0 - mw / 2, hy); g.fillStyle = "#000"; g.fill();
+    if (open > 4) {
+      g.save(); g.clip();
+      sun(x0, hy + open * 0.2, Math.max(2, open * 0.18), "disc");
+      for (let i = -5; i <= 5; i++) { const tx = x0 + i * mw * 0.06, tw = mw * 0.045; g.strokeStyle = C.b; g.lineWidth = 2; g.fillStyle = "#000"; g.fillRect(tx - tw / 2, hy - open * 0.42, tw, open * 0.22); g.strokeRect(tx - tw / 2, hy - open * 0.42, tw, open * 0.22); g.fillRect(tx - tw / 2, hy + open * 0.5, tw, open * 0.22); g.strokeRect(tx - tw / 2, hy + open * 0.5, tw, open * 0.22); }
+      g.restore();
+    } else sun(x0 + mw * 0.6, hy - mw * 0.3, S * 0.03, "wire");
+    // lips
+    g.beginPath(); upper(hy - open * 0.45, 0); g.bezierCurveTo(x0 + mw * 0.25, hy - open * 0.5 + lh * 0.2, x0 - mw * 0.25, hy - open * 0.5 + lh * 0.2, x0 - mw / 2, hy); g.closePath();
+    g.fillStyle = C.r; g.fill(); g.strokeStyle = "#000"; g.lineWidth = 3; g.stroke();
+    g.beginPath(); g.moveTo(x0 - mw / 2, hy); g.bezierCurveTo(x0 - mw * 0.25, hy + open + lh * 1.8, x0 + mw * 0.25, hy + open + lh * 1.8, x0 + mw / 2, hy);
+    g.bezierCurveTo(x0 + mw * 0.25, hy + open, x0 - mw * 0.25, hy + open, x0 - mw / 2, hy); g.closePath(); g.fill(); g.stroke();
+    line(0, hy, x0 - mw / 2, hy, C.r2, 1); line(x0 + mw / 2, hy, W, hy, C.r2, 1);
+    s.rect = [x0 - mw / 2, hy - lh * 2 - open, mw, open + lh * 4];
+  },
+  tap(s, x, y) { const r = s.rect; if (r && x > r[0] && x < r[0] + r[2] && y > r[1] && y < r[1] + r[3]) { speak(pick(ADS)[0].toLowerCase(), 0.2, 0.6); return true; } return false; } },
+
+// ---- a staircase of televisions, each showing the sun ----
+{ id: "tvs", speed: 1, amb: { noise: 0.06, nf: 5000, drone: 0.15 },
+  init(s) { s.n = 7; s.static = (Math.random() * 7) | 0; s.ch = {}; s.rects = []; },
+  draw(s, t) {
+    bg();
+    const n = s.n, port = H > W, tw = Math.min(W, H) * (port ? 0.2 : 0.17);
+    s.rects = [];
+    const loop = (t * 0.4) % 1;                            // they loop, and the loop is wrong
+    for (let i = 0; i < n; i++) {
+      const u = i / (n - 1), x = lerp(W * 0.12, W * 0.88 - tw, u) + E.lx * (0.3 + u * 0.4), y = lerp(H * 0.82, H * 0.08, u) - tw * 0.4;
+      line(x - tw * 0.1, y + tw * 0.86, x + tw * 1.1, y + tw * 0.86, C.r2, 2);           // the step
+      line(x + tw * 1.1, y + tw * 0.86, x + tw * 1.1, y + tw * 0.86 - (H * 0.74) / (n - 1), C.r2, 2);
+      rrect(x, y, tw, tw * 0.8, tw * 0.08); g.fillStyle = "#000"; g.fill(); g.strokeStyle = C.b; g.lineWidth = 2; g.stroke();
+      const sx = x + tw * 0.08, sy = y + tw * 0.08, sw = tw * 0.68, sh = tw * 0.62;
+      line(x + tw * 0.4, y, x + tw * 0.25, y - tw * 0.25, C.b, 1); line(x + tw * 0.4, y, x + tw * 0.6, y - tw * 0.22, C.b, 1);
+      g.beginPath(); g.arc(x + tw * 0.88, y + tw * 0.25, tw * 0.05, 0, 7); g.stroke();
+      g.save(); g.beginPath(); g.rect(sx, sy, sw, sh); g.clip();
+      g.fillStyle = C.b3; g.fillRect(sx, sy, sw, sh);
+      const ch = s.ch[i];
+      if (i === s.static || (ch && t < ch.until && ch.kind === "static")) fillPat("static", Math.random() * 64, Math.random() * 64, sx, sy, sw, sh);
+      else if (ch && t < ch.until) olText(ch.text, sx + sw / 2, sy + sh / 2, sh * 0.2, { maxW: sw * 0.9 });
+      else { const ph = (loop + i * 0.13) % 1; sun(sx + sw * (0.2 + 0.6 * ph), sy + sh * (0.75 - 0.5 * Math.sin(ph * Math.PI)), sh * 0.2, i % 3 ? "disc" : "wire"); }
+      g.restore();
+      s.rects.push([x, y, tw, tw * 0.8, i]);
+    }
+  },
+  tap(s, x, y, t) {
+    for (const [rx, ry, rw, rh, i] of s.rects) if (x > rx && x < rx + rw && y > ry && y < ry + rh) {
+      s.ch[i] = Math.random() < 0.4 ? { kind: "static", until: t + 0.8 } : { kind: "text", text: frag(), until: t + 2.2 };
+      hiss(0.3, 0.2, 4000); return true;
+    }
+    return false;
+  } },
+
+// ---- telephones hanging from the wires, ringing. pick one up ----
+{ id: "phones", speed: 0.85, amb: { hum: 0.18 },
+  init(s) { s.phones = Array.from({ length: 5 }, (_, i) => ({ u: (i + 0.5) / 5 + rnd(-0.04, 0.04), w: i % 3, len: rnd(0.12, 0.3), ring: Math.random() < 0.6, up: 0, ph: Math.random() * 6 })); s.next = 0.5; s.said = ""; s.saidT = -9; },
+  draw(s, t) {
+    bg();
+    const hy = H * 0.86 + E.ly * 0.4;
+    sun(CX + E.lx * 0.2, hy, S * 0.25, "disc");
+    g.fillStyle = "#000"; g.fillRect(0, hy, W, H - hy); line(0, hy, W, hy, C.r, 2);
+    const wy = [H * 0.16, H * 0.24, H * 0.32];
+    for (const y of wy) { g.strokeStyle = C.r2; g.lineWidth = 1.5; g.beginPath(); g.moveTo(-10, y + E.ly * 0.3); g.quadraticCurveTo(CX + E.lx * 0.3, y + S * 0.08, W + 10, y + E.ly * 0.3); g.stroke(); }
+    if (t > s.next) { s.next = t + rnd(1.5, 3.5); const p = pick(s.phones); if (!p.up) { p.ring = true; } }
+    let anyRing = false;
+    s.phones.forEach(p => {
+      const x0 = p.u * W + E.lx * 0.3, wyv = wy[p.w] + S * 0.08 * (1 - Math.pow(2 * p.u - 1, 2)) * 0.98;
+      const sw = Math.sin(t * 1.3 + p.ph) * 0.12, len = p.len * H, ringing = p.ring && !p.up && Math.sin(t * 20) > 0 && (t * 1.2 + p.ph) % 2 < 1.2;
+      if (ringing) anyRing = true;
+      const x = x0 + Math.sin(sw) * len + (ringing ? rnd(-2, 2) : 0), y = wyv + Math.cos(sw) * len;
+      g.strokeStyle = C.b; g.lineWidth = 1; g.beginPath(); g.moveTo(x0, wyv);
+      for (let k = 1; k <= 8; k++) { const u = k / 8; g.lineTo(lerp(x0, x, u) + Math.sin(u * 30) * 3, lerp(wyv, y, u)); }
+      g.stroke();
+      const sz = S * 0.055;
+      rrect(x - sz, y, sz * 2, sz * 1.1, sz * 0.25); g.fillStyle = "#000"; g.fill(); g.strokeStyle = C.r; g.lineWidth = 2; g.stroke();
+      g.beginPath(); g.arc(x, y + sz * 0.6, sz * 0.32, 0, 7); g.strokeStyle = C.b; g.stroke();
+      const hu = p.up ? sz * 1.4 : 0;
+      g.lineWidth = sz * 0.28; g.strokeStyle = C.r; g.lineCap = "round"; g.beginPath(); g.moveTo(x - sz * 0.9, y - sz * 0.1 - hu); g.lineTo(x + sz * 0.9, y - sz * 0.1 - hu); g.stroke(); g.lineCap = "butt";
+      if (ringing) plain("RING", x, y - sz * 0.7, Math.max(9, S * 0.022), C.r2);
+      p.hit = [x, y + sz * 0.5, sz * 1.6];
+    });
+    if (anyRing && Math.random() < 0.05) ring();
+    if (t - s.saidT < 4) olText(s.said, CX, H * 0.62, Math.min(S * 0.06, 34), { fill: C.b, shadow: C.r3, maxW: W * 0.9 });
+  },
+  tap(s, x, y, t) {
+    for (const p of s.phones) if (p.hit && Math.hypot(x - p.hit[0], y - p.hit[1]) < p.hit[2]) {
+      p.up = 1; p.ring = false; s.said = "“" + pick(FATHER) + "”"; s.saidT = t;
+      speak(s.said.slice(1, -1), 0.35, 0.75); return true;
+    }
+    return false;
+  } },
+
+// ---- a gas station floating in the clouds; the pumps count your altitude in dollars ----
+{ id: "gas", speed: 1, amb: { drone: 0.25, hum: 0.08 },
+  init(s) { s.clouds = Array.from({ length: 7 }, () => ({ x: Math.random(), y: rnd(0.1, 0.95), w: rnd(0.18, 0.4), v: rnd(0.01, 0.04) })); s.alt = null; s.altT = -9; s.pumps = []; },
+  draw(s, t, dt) {
+    bg();
+    sun(W * 0.82 + E.lx * 0.2, H * 0.15, S * 0.06, "wire");
+    for (const c of s.clouds.slice(0, 4)) { c.x = wrap(c.x + c.v * dt, 1.4); cloud((c.x - 0.2) * W + E.lx * 0.4, c.y * H, c.w * S); }
+    const cw = Math.min(W * 0.8, S * 1.1), x0 = CX - cw / 2 + E.lx * 0.7, y0 = CY - S * 0.15 + E.ly + Math.sin(t * 0.7) * S * 0.01;
+    box(x0, y0, cw, S * 0.07, "#000", C.r, 3);
+    olText("GAS · 24 HRS", x0 + cw / 2, y0 + S * 0.035, S * 0.045, { maxW: cw * 0.9 });
+    line(x0, y0 + S * 0.07, x0 + cw, y0 + S * 0.07, C.b, 2);
+    for (const u of [0.08, 0.92]) line(x0 + cw * u, y0 + S * 0.07, x0 + cw * u, y0 + S * 0.38, C.r2, 3);
+    const dollars = (E.h * 48211 + t * 3.17).toFixed(2).replace(/\B(?=(\d{3})+(?!\d))/g, ",");
+    s.pumps = [];
+    for (const u of [0.3, 0.6]) {
+      const px = x0 + cw * u, py = y0 + S * 0.16, pw = cw * 0.13, ph = S * 0.22;
+      box(px, py, pw, ph, "#000", C.b, 2);
+      box(px + pw * 0.1, py + ph * 0.1, pw * 0.8, ph * 0.25, C.b3, C.b, 1);
+      const shown = s.alt && t - s.altT < 2 ? s.alt : "$" + dollars;
+      plain(shown, px + pw / 2, py + ph * 0.225, Math.max(8, pw * 0.15), C.r, { font: TT });
+      line(px + pw, py + ph * 0.4, px + pw * 1.3, py + ph * 0.7, C.b, 2);
+      s.pumps.push([px, py, pw, ph]);
+    }
+    plain("feelings extra.", x0 + cw / 2, y0 + S * 0.42, Math.max(10, S * 0.025), C.b2, { font: SF, style: "italic" });
+    for (const c of s.clouds.slice(4)) { c.x = wrap(c.x + c.v * 1.6 * dt, 1.4); cloud((c.x - 0.2) * W + E.lx * 1.2, c.y * H, c.w * S, C.b2); }
+  },
+  tap(s, x, y, t) { for (const [px, py, pw, ph] of s.pumps) if (x > px && x < px + pw && y > py && y < py + ph) { s.alt = pick(["INSERT FEELINGS", "$NaN", "SEE ATTENDANT", "PREPAY INSIDE"]); s.altT = t; tone("sine", 1568, 1568, 0.5, 0.06); return true; } return false; } },
+
+// ---- rain falling upward, ads printed on the drops ----
+{ id: "uprain", speed: 1.1, amb: { noise: 0.22, nf: 1400, drone: 0.1 },
+  init(s) { s.drops = Array.from({ length: 70 }, () => ({ x: Math.random(), y: Math.random(), v: rnd(0.25, 0.6), ad: Math.random() < 0.2 ? pick(ADS)[Math.random() < 0.5 ? 0 : 1] : null })); s.burst = []; },
+  draw(s, t, dt) {
+    bg();
+    const hy = H * 0.74 + E.ly;
+    g.fillStyle = "#000"; g.fillRect(0, hy, W, H - hy); line(0, hy, W, hy, C.r2, 1);
+    for (let i = 0; i < 7; i++) { const x = CX + E.lx * 0.5 + (i - 3) * S * 0.22; line(x, hy, x, hy - S * 0.13, C.r2, 2); line(x - S * 0.03, hy - S * 0.12, x + S * 0.03, hy - S * 0.12, C.r2, 2); }
+    g.save(); g.beginPath(); g.ellipse(CX + E.lx * 0.3, hy + (H - hy) * 0.5, S * 0.2, (H - hy) * 0.22, 0, 0, 7); g.clip();   // a puddle with the sun in it
+    fillPat("lino", 0, t * 6, 0, hy, W, H - hy, 0.5);
+    sun(CX + E.lx * 0.3, hy + (H - hy) * 0.5, S * 0.07, "disc");
+    g.restore();
+    g.font = `${Math.max(8, S * 0.018)}px ${TT}`; g.textAlign = "left"; g.textBaseline = "middle";
+    for (const d of s.drops) {
+      d.y -= d.v * dt * (1 + E.h); if (d.y < -0.1) { d.y = 1.05; d.x = Math.random(); }
+      const x = d.x * W + E.lx * 0.4, y = d.y * H;
+      line(x, y, x, y + S * 0.03, C.b, 1.5);
+      if (d.ad) { g.fillStyle = C.r2; g.fillText(d.ad, x + 4, y + S * 0.015); }
+    }
+    s.burst = s.burst.filter(b => t - b.t < 1.6);
+    for (const b of s.burst) olText(b.text, b.x, b.y - (t - b.t) * S * 0.08, S * 0.04, { fill: C.b, shadow: C.r3 });
+  },
+  tap(s, x, y, t) { s.burst.push({ x, y, t, text: frag() }); hiss(0.2, 0.15, 6000); return true; } },
+
+// ---- your reflection, flying beside you, slightly late ----
+{ id: "mirror", speed: 0.7, amb: {},
+  init(s) { s.waved = -9; },
+  draw(s, t) {
+    bg();
+    const port = H > W, pw = port ? W * 0.8 : W * 0.4, ph = port ? H * 0.42 : H * 0.8;
+    const px = port ? CX - pw / 2 : W * 0.55, py = port ? H * 0.5 : H * 0.1;
+    g.strokeStyle = C.r3; g.lineWidth = 1;
+    for (let i = 0; i < 6; i++) { const y = H * (0.1 + i * 0.16) + E.ly; g.beginPath(); g.moveTo(0, y); g.lineTo(port ? W : px - 10, y); g.stroke(); }
+    box(px, py, pw, ph, "#03031a", C.b, 3);
+    g.save(); g.beginPath(); g.rect(px, py, pw, ph); g.clip();
+    sun(px + pw * 0.2, py + ph * 0.18, S * 0.05, "wire");                  // the sun is only in the mirror
+    const [, lr, lp] = lateInput(700), fx = px + pw / 2 - lr * pw * 0.12, fy = py + ph * 0.55 - lp * ph * 0.1;
+    g.save(); g.translate(fx, fy); g.rotate(lr * 0.5 + (t - s.waved < 1 ? Math.sin(t * 20) * 0.3 : 0));
+    const k = S * 0.12;
+    g.strokeStyle = C.r; g.lineWidth = 3; g.lineCap = "round";
+    g.beginPath(); g.arc(0, -k * 0.55, k * 0.12, 0, 7); g.stroke();
+    g.beginPath(); g.moveTo(0, -k * 0.42); g.lineTo(0, k * 0.15); g.moveTo(0, k * 0.15); g.lineTo(-k * 0.12, k * 0.55); g.moveTo(0, k * 0.15); g.lineTo(k * 0.12, k * 0.55); g.stroke();
+    for (const sd of [-1, 1]) {                                            // wings of feathers
+      g.strokeStyle = C.b; g.lineWidth = 2;
+      for (let f = 0; f < 6; f++) { g.beginPath(); g.moveTo(0, -k * 0.3); g.lineTo(sd * k * (0.4 + f * 0.1), -k * (0.35 - f * 0.08)); g.stroke(); }
+    }
+    g.restore();
+    line(px + pw * 0.1, py + ph * 0.1, px + pw * 0.35, py + ph * 0.02, "rgba(58,58,255,.35)", 2);
+    line(px + pw * 0.15, py + ph * 0.25, px + pw * 0.6, py + ph * 0.05, "rgba(58,58,255,.25)", 2);
+    g.restore();
+    plain("objects in the mirror are later than they appear", px + pw / 2, py + ph + Math.max(12, S * 0.03), Math.max(9, S * 0.02), C.b2, { font: SF, style: "italic" });
+    s.rect = [px, py, pw, ph];
+  },
+  tap(s, x, y, t) { const r = s.rect; if (r && x > r[0] && x < r[0] + r[2] && y > r[1] && y < r[1] + r[3]) { s.waved = t; pops.push({ x, y, text: "it saw you", t0: performance.now() }); return true; } return false; } },
+
+// ---- a parking lot that never ends; every space is a truth number ----
+{ id: "lot", speed: 1.2, amb: { hum: 0.2, drone: 0.15 },
+  init(s) { s.z = 0; s.labels = []; },
+  draw(s, t, dt) {
+    bg();
+    const hy = H * 0.36 + E.ly, f = S * 0.9, cam = 1.6;
+    sun(CX + E.lx * 0.15, hy, S * 0.4, "disc");
+    g.fillStyle = "#000"; g.fillRect(0, hy, W, H - hy); line(0, hy, W, hy, C.r, 2);
+    s.z += dt * (3 + 6 * E.h);
+    const P = (x, z) => [CX + E.lx + (x * f) / z, hy + (cam * f) / z];
+    const d = truthsData || FALLBACK, nums = [...d.truths.map((_, i) => String(i + 1).padStart(2, "0")), ...d.deep.map((_, i) => "D" + (i + 1))];
+    s.labels = [];
+    g.strokeStyle = C.r2; g.lineWidth = 1.5; g.textAlign = "center"; g.textBaseline = "middle";
+    for (let row = 30; row >= 0; row--) {
+      const zr = row * 5.5 - (s.z % 5.5) + 1.2;
+      if (zr < 0.8) continue;
+      const ri = row + Math.floor(s.z / 5.5);
+      for (let col = -6; col <= 6; col++) {
+        const x = col * 2.7, a = P(x, zr), b = P(x, zr + 4.5);
+        g.beginPath(); g.moveTo(a[0], a[1]); g.lineTo(b[0], b[1]); g.stroke();
+        if (col < 6) {
+          const c = P(x + 1.35, zr + 1.3), sz = (0.7 * f) / zr;
+          if (sz > 5 && c[0] > -20 && c[0] < W + 20) {
+            const num = nums[(((ri * 13 + col * 7) % nums.length) + nums.length) % nums.length];
+            g.font = `italic 700 ${sz}px ${SF}`; g.fillStyle = zr < 12 ? C.r : C.r2; g.fillText(num, c[0], c[1]);
+            if (sz > 12) s.labels.push([c[0], c[1], sz, num]);
+          }
+        }
+      }
+      const l1 = P(-16.2, zr), l2 = P(16.2, zr); g.beginPath(); g.moveTo(l1[0], l1[1]); g.lineTo(l2[0], l2[1]); g.stroke();
+      if (row % 3 === 0) { const lp = P(row % 2 ? -9 : 9, zr), lt = [lp[0], lp[1] - (4.5 * f) / zr]; line(lp[0], lp[1], lt[0], lt[1], C.b, 1.5); g.beginPath(); g.arc(lt[0], lt[1], (0.5 * f) / zr, 0, 7); g.strokeStyle = C.r2; g.stroke(); g.lineWidth = 1.5; }
+    }
+  },
+  tap(s, x, y) {
+    let best = null, bd = Infinity;
+    for (const l of s.labels) { const dd = Math.hypot(x - l[0], y - l[1]); if (dd < l[2] * 1.5 && dd < bd) { bd = dd; best = l; } }
+    if (!best) return false;
+    const d = truthsData || FALLBACK, ever = loadSeen().ever, isD = best[3][0] === "D";
+    const tr = isD ? d.deep[+best[3].slice(1) - 1] : d.truths[+best[3] - 1];
+    pops.push({ x, y, text: tr && ever.includes(tr.id) ? tr.text : "████████", t0: performance.now() });
+    blip(); return true;
+  } },
+
+// ---- a motel sign in the void; the O is the sun ----
+{ id: "motel", speed: 0.75, amb: { noise: 0.06, nf: 7000, hum: 0.12 },
+  init(s) { s.no = false; },
+  draw(s, t) {
+    bg();
+    fillPat("stars", t * 3, 0, 0, 0, W, H, 0.6);
+    const sz = Math.min(W * 0.2, S * 0.26), x0 = CX + E.lx * 0.6, y0 = CY - sz * 0.6 + E.ly;
+    g.font = `italic 700 ${sz}px ${SF}`;
+    const wM = g.measureText("M").width, wT = g.measureText("TEL").width, o = sz * 0.36, tot = wM + o * 2.3 + wT, left = x0 - tot / 2;
+    line(x0, y0 + sz * 0.7, x0, H, C.r2, Math.max(3, S * 0.012));
+    box(left - sz * 0.15, y0 - sz * 0.65, tot + sz * 0.3, sz * 1.3, "#000", C.b, 3);
+    const on = (t * 3 + Math.sin(t * 7)) % 4 > 0.25;
+    if (on) { olText("M", left + wM / 2, y0, sz); olText("TEL", left + wM + o * 2.3 + wT / 2, y0, sz); }
+    sun(left + wM + o * 1.15, y0, o, "wire");
+    const vy = y0 + sz * 1.1, flick = Math.sin(t * 13) > 0.6;
+    olText((s.no || flick ? "NO " : "") + "VACANCY", x0, vy, sz * 0.32, { fill: C.b, shadow: C.r3 });
+    for (let i = 0; i < 4; i++) if (Math.floor(t * 5) % 5 > i) { const ax = x0 + tot * 0.55 + i * sz * 0.18, ay = vy; g.strokeStyle = C.r; g.lineWidth = 3; g.beginPath(); g.moveTo(ax, ay - sz * 0.1); g.lineTo(ax + sz * 0.08, ay); g.lineTo(ax, ay + sz * 0.1); g.stroke(); }
+    s.rect = [left - sz * 0.15, y0 - sz * 0.65, tot + sz * 0.3, sz * 1.9];
+  },
+  tap(s, x, y) { const r = s.rect; if (r && x > r[0] && x < r[0] + r[2] && y > r[1] && y < r[1] + r[3]) { s.no = !s.no; pops.push({ x, y, text: s.no ? "the room is taken" : "the room is ready", t0: performance.now() }); hiss(0.15, 0.2, 7000); return true; } return false; } },
+
+// ---- a child's drawing: the sun is a yellow circle, and the stick figure has wings ----
+{ id: "child", speed: 0.55, amb: {},
+  init(s) { s.marks = []; s.fig = 0; },
+  draw(s, t, dt) {
+    fillPat("ruled", 0, 0);
+    line(W * 0.08, 0, W * 0.08, H, C.r2, 1.5);
+    sun(W * 0.78, H * 0.2, S * 0.1, "child");
+    const gy = H * 0.86;
+    const grass = []; for (let x = 0; x <= W; x += S * 0.03) grass.push([x, gy - (Math.round(x / (S * 0.03)) % 2 ? S * 0.03 : 0)]);
+    crayon(grass, C.b, 3, 1);
+    const hx = W * 0.14, hs = S * 0.2;
+    crayon([[hx, gy], [hx, gy - hs], [hx + hs, gy - hs], [hx + hs, gy], [hx, gy]], C.r, 3, 5);
+    crayon([[hx - hs * 0.1, gy - hs], [hx + hs / 2, gy - hs * 1.6], [hx + hs * 1.1, gy - hs]], C.r2, 3, 9);
+    crayon([[hx + hs * 0.4, gy], [hx + hs * 0.4, gy - hs * 0.45], [hx + hs * 0.65, gy - hs * 0.45], [hx + hs * 0.65, gy]], C.b, 2, 12);
+    s.fig += ((0.2 + 0.7 * clamp(E.pitch, 0, 1)) - s.fig) * dt * 0.8;
+    const fx = W * 0.55 + E.lx * 0.3, fy = gy - s.fig * H * 0.6 - S * 0.12, k = S * 0.11;
+    crayon([[fx, fy - k * 0.3], [fx, fy + k * 0.3]], C.r, 3, 20);
+    crayon([[fx, fy + k * 0.3], [fx - k * 0.2, fy + k * 0.7]], C.r, 3, 21); crayon([[fx, fy + k * 0.3], [fx + k * 0.2, fy + k * 0.7]], C.r, 3, 22);
+    const flap = Math.sin(t * 6) * k * 0.2;
+    crayon([[fx, fy - k * 0.1], [fx - k * 0.9, fy - k * 0.5 - flap], [fx - k * 0.6, fy + k * 0.05]], C.b, 3, 23);
+    crayon([[fx, fy - k * 0.1], [fx + k * 0.9, fy - k * 0.5 - flap], [fx + k * 0.6, fy + k * 0.05]], C.b, 3, 24);
+    g.strokeStyle = C.r; g.lineWidth = 3; g.beginPath(); g.arc(fx, fy - k * 0.45, k * 0.15, 0, 7); g.stroke();
+    crayon([[fx + k * 1.6, fy - k * 0.8], [fx + k * 0.5, fy - k * 0.35]], C.r2, 2, 30);
+    g.save(); g.translate(fx + k * 1.75, fy - k * 0.9); g.rotate(-0.15 + Math.sin(Math.floor(t * 6)) * 0.03);
+    g.font = `italic 700 ${S * 0.05}px ${SF}`; g.fillStyle = C.r; g.textAlign = "left"; g.fillText("ME", 0, 0); g.restore();
+    for (const m of s.marks) crayon(m.pts, m.col, 3, m.seed);
+  },
+  tap(s, x, y) { const pts = []; for (let i = 0; i < 7; i++) pts.push([x + rnd(-1, 1) * S * 0.05, y + rnd(-1, 1) * S * 0.05]); s.marks.push({ pts, col: pick([C.r, C.b, C.r2]), seed: Math.random() * 99 }); if (s.marks.length > 12) s.marks.shift(); return true; } },
+
+// ---- the highway at night (the old world), streaming past ----
+{ id: "highway", speed: 1.3, amb: { drone: 0.25, hum: 0.15, noise: 0.06, nf: 250 },
+  init(s) { s.z = 0; s.ad = pick(ADS); s.lastBz = 999; s.rect = null; },
+  draw(s, t, dt) {
+    bg();
+    const hy = H * 0.42 + E.ly, f = S * 0.9, cam = 1.6;
+    const P = (x, y, z) => [CX + E.lx + (x * f) / z, hy + ((cam - y) * f) / z];
+    sun(CX + E.lx * 0.1, hy - S * 0.06, S * 0.06, "wire");
+    line(0, hy, W, hy, C.r2, 1);
+    s.z += dt * (12 + 22 * E.h);
+    for (const x of [-4, 4]) { const a = P(x, 0, 1.2), b = P(x, 0, 400); line(a[0], a[1], b[0], b[1], C.r, 2); }
+    for (let k = 0; k < 30; k++) { const z = k * 6 - (s.z % 6) + 1.5; if (z < 1.2) continue; const a = P(0, 0, z), b = P(0, 0, z + 2.5); line(a[0], a[1], b[0], b[1], z < 20 ? C.r : C.r2, Math.max(1, 30 / z)); }
+    for (const sd of [-1, 1]) {
+      let prev = null;
+      for (let k = 14; k >= 0; k--) {
+        const z = k * 10 - (s.z % 10) + 1.5;
+        if (z < 1.2) { prev = null; continue; }
+        const x = sd * 7, b = P(x, 0, z), tp = P(x, 5.5, z), ar1 = P(x - 1, 5, z), ar2 = P(x + 1, 5, z), col = z < 30 ? C.r : C.r2;
+        line(b[0], b[1], tp[0], tp[1], col, Math.max(1, 20 / z)); line(ar1[0], ar1[1], ar2[0], ar2[1], col, Math.max(1, 12 / z));
+        if (prev) { g.strokeStyle = col; g.lineWidth = 1; g.beginPath(); g.moveTo(ar1[0], ar1[1]); g.quadraticCurveTo((ar1[0] + prev[0]) / 2, (ar1[1] + prev[1]) / 2 + ((30 / z) * S) / 100, prev[0], prev[1]); g.stroke(); }
+        prev = ar1;
+      }
+    }
+    const bz = 70 - (s.z % 80);
+    if (bz > s.lastBz) s.ad = pick(ADS);
+    s.lastBz = bz;
+    s.rect = null;
+    if (bz > 2.5) {
+      const a = P(9, 7.5, bz), c = P(19, 3.5, bz);
+      const bw = c[0] - a[0], bh = c[1] - a[1];
+      const leg = P(11, 0, bz); line(a[0] + bw * 0.3, c[1], leg[0], leg[1], C.r2, 2);
+      box(a[0], a[1], bw, bh, "#000", C.r, 2);
+      if (bw > 40) { olText(s.ad[0], a[0] + bw / 2, a[1] + bh * 0.4, bh * 0.25, { maxW: bw * 0.9 }); plain(s.ad[1], a[0] + bw / 2, a[1] + bh * 0.75, Math.max(7, bh * 0.12), C.b, { font: SF, style: "italic" }); }
+      s.rect = [a[0], a[1], bw, bh];
+    }
+  },
+  tap(s, x, y) { const r = s.rect; if (r && x > r[0] && x < r[0] + r[2] && y > r[1] && y < r[1] + r[3]) { s.ad = pick(ADS); click(); return true; } tone("square", 330, 300, 0.4, 0.04); return false; } },
+
+// ---- a 90s home page, under construction ----
+{ id: "homepage", speed: 0.9, amb: { drone: 0.1 },
+  init(s) { s.links = []; s.mq = 0; },
+  draw(s, t, dt) {
+    fillPat("stars", t * 6, t * 3);
+    const bw = Math.min(W * 0.9, 560), bh = Math.min(H * 0.86, 520), x0 = CX - bw / 2 + E.lx * 0.3, y0 = CY - bh / 2 + E.ly * 0.5;
+    g.fillStyle = "#000"; g.fillRect(x0, y0, bw, bh);
+    line(x0, y0, x0 + bw, y0, C.b, 3); line(x0, y0, x0, y0 + bh, C.b, 3); line(x0 + bw, y0, x0 + bw, y0 + bh, C.b3, 3); line(x0, y0 + bh, x0 + bw, y0 + bh, C.b3, 3);
+    const u = bh / 10;
+    olText("WELCOME TO THE SKY", x0 + bw / 2, y0 + u * 0.8, Math.min(u * 0.8, bw * 0.08), { maxW: bw * 0.9 });
+    g.save(); g.beginPath(); g.rect(x0 + 8, y0 + u * 1.5, bw - 16, u * 0.7); g.clip();
+    s.mq += dt * 70;
+    plain("*** you are flying *** best viewed at 800x600 *** the sun is not responsible for wax damage *** sign my guestbook ***", x0 + bw - (s.mq % (bw * 3)), y0 + u * 1.85, Math.max(10, u * 0.32), C.r, { align: "left", font: TT });
+    g.restore();
+    fillPat("under", t * 20, 0, x0 + 8, y0 + u * 2.4, bw - 16, u * 0.6);
+    olText("UNDER CONSTRUCTION", x0 + bw / 2, y0 + u * 2.7, u * 0.35, { maxW: bw * 0.8, fill: C.b, shadow: C.r3 });
+    sun(x0 + bw * 0.25, y0 + u * 4.6, u * 0.8, "gif");
+    plain("you are visitor", x0 + bw * 0.68, y0 + u * 3.9, Math.max(10, u * 0.3), C.b, { font: SF, style: "italic" });
+    const n = String(Math.floor(E.h * 1e6 + 1)).padStart(7, "0");
+    for (let i = 0; i < 7; i++) { const cw = Math.min(u * 0.42, bw * 0.06), cx = x0 + bw * 0.68 - cw * 3.5 + i * cw; box(cx, y0 + u * 4.3, cw - 2, u * 0.6, "#000", C.b3, 1); plain(n[i], cx + cw / 2 - 1, y0 + u * 4.6, u * 0.4, C.r, { font: TT }); }
+    s.links = [];
+    ["click here to land", "my links", "guestbook", "email me"].forEach((l, i) => {
+      const ly = y0 + u * (6.4 + i * 0.85), size = Math.max(12, u * 0.4);
+      g.font = `${size}px ${SF}`; const w = g.measureText(l).width;
+      plain(l, x0 + bw / 2, ly, size, C.b, { font: SF });
+      line(x0 + bw / 2 - w / 2, ly + size * 0.5, x0 + bw / 2 + w / 2, ly + size * 0.5, C.b, 1);
+      s.links.push([x0 + bw / 2 - w / 2, ly - size * 0.7, w, size * 1.4, l]);
+    });
+  },
+  tap(s, x, y) {
+    for (const [lx, ly, lw, lh, l] of s.links) if (x > lx && x < lx + lw && y > ly && y < ly + lh) {
+      if (l === "click here to land") jumpScene(); else pops.push({ x, y, text: l === "guestbook" ? "thank you for signing." : l === "email me" ? "mailbox full." : "404", t0: performance.now() });
+      click(); return true;
+    }
+    return false;
+  } },
+
+// ---- a motel corridor; the sun is the light at the end ----
+{ id: "corridor", speed: 0.8, amb: { hum: 0.25, drone: 0.1 },
+  init(s) { s.z = 0; s.open = {}; s.doors = []; },
+  draw(s, t, dt) {
+    bg();
+    const vx = CX + E.lx, vy = CY + E.ly;
+    s.z += dt * 1.5;
+    const P = (x, y, z) => [vx + (x * S * 0.5) / z, vy + (y * S * 0.5) / z];   // corridor 2 wide, 2.4 high
+    const far = 12;
+    g.save(); g.beginPath(); const a = P(-1, 1.2, 1), b = P(1, 1.2, 1), c = P(1, 1.2, far), d = P(-1, 1.2, far);
+    g.moveTo(a[0], a[1]); g.lineTo(b[0], b[1]); g.lineTo(c[0], c[1]); g.lineTo(d[0], d[1]); g.closePath(); g.clip();
+    fillPat("carpet", 0, s.z * 30); g.restore();
+    for (const [x, y] of [[-1, -1.2], [1, -1.2], [-1, 1.2], [1, 1.2]]) { const p = P(x, y, 0.6), q = P(x, y, far); line(p[0], p[1], q[0], q[1], C.b, 2); }
+    const e1 = P(-1, -1.2, far), e2 = P(1, 1.2, far);
+    box(e1[0], e1[1], e2[0] - e1[0], e2[1] - e1[1], "#000", C.b, 2);
+    sun((e1[0] + e2[0]) / 2, (e1[1] + e2[1]) / 2, (e2[0] - e1[0]) * 0.3, "disc");
+    s.doors = [];
+    for (let k = 9; k >= 0; k--) {
+      const z = k * 1.6 - (s.z % 1.6) + 0.9, num = 100 + k + Math.floor(s.z / 1.6);
+      if (z < 0.7) continue;
+      for (const sd of [-1, 1]) {
+        const p1 = P(sd, -0.9, z), p2 = P(sd, 1.2, z), p3 = P(sd, -0.9, z + 0.7), p4 = P(sd, 1.2, z + 0.7);
+        const id = num * 2 + (sd > 0 ? 1 : 0), open = s.open[id] && t - s.open[id] < 3;
+        g.beginPath(); g.moveTo(p1[0], p1[1]); g.lineTo(p3[0], p3[1]); g.lineTo(p4[0], p4[1]); g.lineTo(p2[0], p2[1]); g.closePath();
+        g.fillStyle = open ? C.b3 : "#000"; g.fill(); g.strokeStyle = z < 5 ? C.r : C.r2; g.lineWidth = Math.max(1, 3 / z); g.stroke();
+        const lab = P(sd, -0.55, z + 0.35);
+        if (S / z > 40) plain(String(num), lab[0], lab[1], Math.max(7, (S * 0.03) / z), C.b, { font: TT });
+        s.doors.push([Math.min(p1[0], p3[0]), p1[1], Math.abs(p3[0] - p1[0]) + 1, p2[1] - p1[1], id]);
+      }
+      if (k % 2 === 0 && Math.sin(t * 9 + k * 3) > -0.8) { const l = P(0, -1.2, z + 0.3); g.fillStyle = C.r2; g.fillRect(l[0] - (S * 0.04) / z, l[1], (S * 0.08) / z, (S * 0.01) / z + 1); }
+    }
+  },
+  tap(s, x, y, t) {
+    for (let i = s.doors.length - 1; i >= 0; i--) { const [dx, dy, dw, dh, id] = s.doors[i]; if (x > dx && x < dx + dw && y > dy && y < dy + dh) { s.open[id] = t; pops.push({ x, y, text: frag(), t0: performance.now() }); tone("square", 120, 90, 0.15, 0.05); return true; } }
+    return false;
+  } },
+
+// ---- giant feathers falling, in silence ----
+{ id: "feathers", speed: 0.5, amb: {},
+  init(s) { s.f = Array.from({ length: 6 }, () => ({ x: rnd(0.1, 0.9), y: rnd(-0.2, 1), r: rnd(-1, 1), v: rnd(0.03, 0.07), sp: rnd(-0.4, 0.4), up: 0 })); },
+  draw(s, t, dt) {
+    bg();
+    sun(CX + E.lx * 0.2, H * 0.08, S * 0.02, "disc");
+    for (const f of s.f) {
+      f.y += (f.up > 0 ? -0.5 : f.v) * dt; f.up -= dt; f.r += f.sp * dt;
+      if (f.y > 1.3) { f.y = -0.3; f.x = rnd(0.1, 0.9); }
+      if (f.y < -0.4) { f.y = 1.2; }
+      const x = f.x * W + E.lx * 0.5 + Math.sin(t * 0.5 + f.r * 3) * S * 0.05, y = f.y * H, L = S * 0.35;
+      g.save(); g.translate(x, y); g.rotate(f.r + Math.sin(t * 0.7 + f.x * 9) * 0.25);
+      g.strokeStyle = C.r; g.lineWidth = 2; g.beginPath(); g.moveTo(0, -L / 2); g.quadraticCurveTo(L * 0.05, 0, 0, L / 2); g.stroke();
+      g.strokeStyle = C.b; g.lineWidth = 1;
+      for (let i = 0; i < 16; i++) { const u = -0.4 + (i / 15) * 0.85, w = L * 0.16 * Math.sin(((u + 0.45) / 0.9) * Math.PI); g.beginPath(); g.moveTo(0, u * L); g.lineTo(-w, u * L - L * 0.06); g.moveTo(0, u * L); g.lineTo(w, u * L - L * 0.06); g.stroke(); }
+      g.restore();
+      f.hit = [x, y, L * 0.4];
+    }
+  },
+  tap(s, x, y) { for (const f of s.f) if (f.hit && Math.hypot(x - f.hit[0], y - f.hit[1]) < f.hit[2]) { f.up = 2.5; return true; } return false; } },
+
+// ---- an error dialog. it flashes ----
+{ id: "error", speed: 3.5, amb: {},
+  init(s) { s.btn = []; tone("square", 880, 880, 0.12, 0.05); tone("square", 660, 660, 0.18, 0.05, 0.12); },
+  draw(s, t) {
+    fillPat("wallpaper", 0, 0);
+    const dw = Math.min(W * 0.9, 460), dh = dw * 0.45, x0 = CX - dw / 2, y0 = CY - dh / 2;
+    box(x0, y0, dw, dh, "#000", C.b, 2);
+    const grd = g.createLinearGradient(x0, 0, x0 + dw, 0); grd.addColorStop(0, C.b2); grd.addColorStop(1, C.b3);
+    g.fillStyle = grd; g.fillRect(x0 + 2, y0 + 2, dw - 4, dh * 0.16);
+    plain("Sun.exe", x0 + 10, y0 + dh * 0.1, Math.max(10, dh * 0.08), "#000", { align: "left", font: SF, style: "bold" });
+    sun(x0 + dh * 0.22, y0 + dh * 0.45, dh * 0.1, "disc");
+    g.font = `${Math.max(10, dh * 0.075)}px ${SF}`; g.fillStyle = C.r; g.textAlign = "left"; g.textBaseline = "top";
+    wrapText("The sun has performed an illegal operation and will be shut down. If the problem persists, stop flying.", dw * 0.6).forEach((l, i) => g.fillText(l, x0 + dh * 0.45, y0 + dh * 0.28 + i * dh * 0.1));
+    s.btn = [];
+    [["OK", 0.42], ["Details >>", 0.7]].forEach(([l, u]) => { const bw = dw * 0.22, bx = x0 + dw * u - bw / 2, by = y0 + dh * 0.74; box(bx, by, bw, dh * 0.16, "#000", C.b, 2); plain(l, bx + bw / 2, by + dh * 0.08, Math.max(10, dh * 0.07), C.b, { font: SF }); s.btn.push([bx, by, bw, dh * 0.16, l]); });
+  },
+  tap(s, x, y) { for (const [bx, by, bw, bh, l] of s.btn) if (x > bx && x < bx + bw && y > by && y < by + bh) { if (l === "OK") jumpScene(); else pops.push({ x, y, text: frag(), t0: performance.now() }); click(); return true; } return false; } },
+];
+
+// The hidden room above the sky: one object per flight leads here
+const SECRET = { id: "secret", speed: 0, amb: { drone: 0.05 },
+  init() {},
+  draw() {
+    bg();
+    const vx = CX, vy = CY, P = (x, y, z) => [vx + (x * S * 0.5) / z, vy + (y * S * 0.5) / z];
+    const far = 3;
+    g.save(); const a = P(-1.4, 1, 1), b = P(1.4, 1, 1), c = P(1.4, 1, far), d = P(-1.4, 1, far);
+    g.beginPath(); g.moveTo(a[0], a[1]); g.lineTo(b[0], b[1]); g.lineTo(c[0], c[1]); g.lineTo(d[0], d[1]); g.closePath(); g.clip(); fillPat("lino", 0, 0); g.restore();
+    for (const [x, y] of [[-1.4, -1], [1.4, -1], [-1.4, 1], [1.4, 1]]) { const p = P(x, y, 0.6), q = P(x, y, far); line(p[0], p[1], q[0], q[1], C.b, 2); }
+    const e1 = P(-1.4, -1, far), e2 = P(1.4, 1, far);
+    g.strokeStyle = C.b; g.lineWidth = 2; g.strokeRect(e1[0], e1[1], e2[0] - e1[0], e2[1] - e1[1]);
+    const w1 = P(-0.5, -0.6, far), w2 = P(0.5, 0.1, far);                     // a window; the sun is below you now
+    box(w1[0], w1[1], w2[0] - w1[0], w2[1] - w1[1], "#000", C.r, 2);
+    g.save(); g.beginPath(); g.rect(w1[0], w1[1], w2[0] - w1[0], w2[1] - w1[1]); g.clip();
+    sun((w1[0] + w2[0]) / 2, w2[1] - (w2[1] - w1[1]) * 0.05, (w2[0] - w1[0]) * 0.22, "wire"); g.restore();
+    const b1 = P(-1.3, 0.55, 2.2), b2 = P(-0.4, 1, 2.2); box(b1[0], b1[1], b2[0] - b1[0], b2[1] - b1[1], "#000", C.r2, 2);
+    plain("you weren't supposed to find this.", CX, H * 0.9, Math.max(11, S * 0.03), C.b2, { font: SF, style: "italic" });
+  } };
+
+// ============================================================
+// The flight: scenes cut like links
+// ============================================================
+let mode = "start";            // start | fly | secret | melt | fall | oracle
+let h = 0, hv = 0, melt = 0, flight = null, cur = null, prevSnap = null, sceneIdx = -1, lowT = 0, phaseT = 0;
+let pops = [], drips = [], spin = null, cutFx = null, hold = 0, secretBack = null;
+let lastT = performance.now();
+
+function newFlight() {
+  const order = shuffle(SCENES.slice()).slice(0, NS);
+  flight = { scenes: order.map(def => ({ def, s: {}, inited: false })), snaps: [], visited: [], secret: false, melted: false, start: performance.now() };
+  flight.scenes[1 + ((Math.random() * (NS - 2)) | 0)].secret = { fx: rnd(0.15, 0.85), fy: rnd(0.2, 0.8) };
+  h = 0; hv = 0; melt = 0; E.melt = 0; lowT = 0; sceneIdx = -1; pops = []; drips = []; spin = null; prevSnap = null; hold = 0; cutFx = null;
+  cutTo(0, true);
+}
+function snapshot() {
+  const c = document.createElement("canvas");
+  c.width = Math.max(1, cv.width >> 1); c.height = Math.max(1, cv.height >> 1);
+  try { c.getContext("2d").drawImage(cv, 0, 0, c.width, c.height); } catch (e) { /* nothing to copy yet */ }
+  return c;
+}
+function cutTo(idx, first = false) {
+  if (!first && cur) { const sn = snapshot(); prevSnap = { c: sn, t0: performance.now() }; flight.snaps.push(sn); if (flight.snaps.length > 12) flight.snaps.shift(); }
+  sceneIdx = idx;
+  cur = flight.scenes[idx];
+  if (!cur.inited) { cur.def.init(cur.s); cur.inited = true; }
+  cur.t0 = performance.now();
+  flight.visited.push(cur);
+  setAmb(cur.def.amb);
+  if (!first) {
+    click();
+    noteAct("YOU LEFT.");
+    const r = Math.random();
+    cutFx = r < 0.18 ? { kind: "loading", t0: performance.now(), dur: 350 } : r < 0.27 ? { kind: "broken", t0: performance.now(), dur: 260 } : null;
+  }
+}
+// "cut to another scene": swap the one you're in for one you haven't had, same height
+function jumpScene() {
+  const used = new Set(flight.scenes.map(x => x.def.id)), spare = SCENES.filter(d => !used.has(d.id));
+  if (!spare.length) return;
+  flight.scenes[sceneIdx] = { def: pick(spare), s: {}, inited: false, secret: flight.scenes[sceneIdx].secret };
+  cutTo(sceneIdx);
+}
+function goSecret() {
+  flight.secret = true;
+  secretBack = { cur };
+  cur = { def: SECRET, s: {}, inited: true, t0: performance.now() };
+  mode = "secret"; setAmb(SECRET.amb); tone("sine", 220, 220, 1.5, 0.08); tone("sine", 330, 330, 1.5, 0.05, 0.3);
+}
+function endSecret() {
+  if (mode !== "secret" || !secretBack) return;
+  cur = secretBack.cur; cur.t0 = performance.now(); cur.secret = null; mode = "fly"; setAmb(cur.def.amb);
+  pops.push({ x: CX, y: CY, text: "a door closes somewhere", t0: performance.now() });
+}
+
+function onTap(x, y) {
+  const now = performance.now();
+  if (mode === "oracle") { if (oracle && oracle.typed > 0) speak(oracle.truth.text); return; }
+  if (mode === "secret") { endSecret(); return; }
+  if (mode !== "fly" || !cur) return;
+  noteAct("YOU TOUCHED THE SCREEN.");
+  if (cur.secret) { const sx = cur.secret.fx * W, sy = cur.secret.fy * H; if (Math.hypot(x - sx, y - sy) < Math.max(26, S * 0.05)) { goSecret(); return; } }
+  const t = (now - cur.t0) / 1000;
+  if (cur.def.tap && cur.def.tap(cur.s, x, y, t)) return;
+  const r = Math.random();                          // nothing there: something unexpected anyway
+  if (r < 0.45) { pops.push({ x, y, text: frag(), t0: now }); blip(); }
+  else if (r < 0.7) { spin = { t0: now, dir: Math.random() < 0.5 ? -1 : 1 }; tone("triangle", 300, 900, 0.5, 0.05); }
+  else if (r < 0.85) jumpScene();
+  else speak(frag(), 0.5, 0.7);
+}
+
+function updateFly(now, dt) {
+  readInput(now, dt);
+  const sp = cur.def.speed;
+  const target = (pitchIn > 0 ? pitchIn * CLIMB * sp : pitchIn * CLIMB * 1.4) - SINK;
+  hv += (target - hv) * (1 - Math.exp(-dt / 0.4));
+  h = clamp(h + hv * dt, 0, 1);
+  E.vel = hv; E.h = h;
+  melt = clamp((h - MELT_FROM) / (1 - MELT_FROM), 0, 1); E.melt = melt;
+  const idx = Math.min(NS - 1, Math.floor(h * NS));
+  if (idx !== sceneIdx) cutTo(idx);
+  if (h >= 0.999) { startMelt(now); return; }
+  if (flight.visited.length > 1 || h > 0.05) {      // sank back to the bottom and stayed: the flight is over
+    if (h < 0.003) { lowT += dt; if (lowT > LOW_END) { startFall(now, false); return; } } else lowT = 0;
+  }
+  if (melt > 0 && Math.random() < melt * melt * 0.6) spawnDrip();
+  if (Math.random() < 0.0015 * (1 + melt * 4)) hold = rnd(0.2, 0.55);   // it waits
+  updateAudio();
+}
+function spawnDrip(x = Math.random() * W, big = false) {
+  if (drips.length > 160) return;
+  drips.push({ x, y: -10, v: rnd(20, 80), w: big ? rnd(4, 14) : rnd(2, 7) * (0.5 + melt), col: pick([C.r, C.r, C.r2, C.b]), len: 0 });
+}
+function updateDrips(dt) {
+  drips = drips.filter(d => { d.v += 160 * dt; d.y += d.v * dt; d.len = Math.min(H * 1.2, d.len + d.v * dt * 0.8); return d.y - d.len < H; });
+}
+function drawDrips() {
+  g.lineCap = "round";
+  for (const d of drips) { line(d.x, Math.max(-10, d.y - d.len), d.x, d.y, d.col, d.w); g.fillStyle = d.col; g.beginPath(); g.arc(d.x, d.y, d.w * 0.8, 0, 7); g.fill(); }
+  g.lineCap = "butt";
+}
+function drawPops(now) {
+  pops = pops.filter(p => now - p.t0 < 2200);
+  for (const p of pops) { const u = (now - p.t0) / 2200; g.globalAlpha = 1 - u * u; olText(p.text, clamp(p.x, S * 0.2, W - S * 0.2), p.y - u * S * 0.08, Math.max(14, S * 0.035), { fill: C.b, shadow: C.r3, maxW: W * 0.9 }); g.globalAlpha = 1; }
+}
+function drawSecretThing(sc, t) {
+  const x = sc.secret.fx * W, y = sc.secret.fy * H, k = Math.max(12, S * 0.025);
+  g.save(); g.globalAlpha = 0.85 + 0.15 * Math.sin(t * 3);
+  box(x - k * 0.5, y - k * 0.8, k, k * 1.6, "#000", C.b, 1.5);
+  g.fillStyle = C.r; g.beginPath(); g.arc(x + k * 0.25, y, k * 0.09, 0, 7); g.fill();
+  g.restore();
+}
+function drawCutFx(now) {
+  if (!cutFx) return;
+  const u = (now - cutFx.t0) / cutFx.dur;
+  if (u >= 1) { cutFx = null; return; }
+  bg();
+  if (cutFx.kind === "loading") {
+    plain("Loading...", CX, CY - 14, 14, C.b, { font: SF });
+    box(CX - 80, CY, 160, 10, "#000", C.b, 1); g.fillStyle = C.b; g.fillRect(CX - 78, CY + 2, 156 * u, 6);
+  } else {
+    box(CX - 18, CY - 18, 36, 36, "#000", C.b3, 1);
+    g.strokeStyle = C.r; g.lineWidth = 2; g.beginPath(); g.moveTo(CX - 8, CY - 8); g.lineTo(CX + 8, CY + 8); g.moveTo(CX + 8, CY - 8); g.lineTo(CX - 8, CY + 8); g.stroke();
+  }
+}
+function drawFly(now, dt) {
+  const t = (now - cur.t0) / 1000;
+  g.save();
+  if (spin) {
+    const u = (now - spin.t0) / 700;
+    if (u >= 1) spin = null;
+    else { g.translate(CX, CY); g.rotate(spin.dir * smooth(u) * Math.PI * 2); g.translate(-CX, -CY); }
+  }
+  cur.def.draw(cur.s, t, dt);
+  if (cur.secret && mode === "fly") drawSecretThing(cur, t);
+  g.restore();
+  // melting: the last scene bleeds through, sliding down; drips run over everything
+  if (melt > 0.15 && prevSnap) {
+    const age = (now - prevSnap.t0) / 1000;
+    g.save(); g.globalAlpha = 0.28 * melt; g.drawImage(prevSnap.c, 0, age * 12 * melt, W, H); g.restore();
+  }
+  if (mode === "fly" && t < 3 && flight.visited.length === 1) { g.globalAlpha = clamp(1 - t / 3, 0, 1); olText("tilt to rise", CX, H * 0.86, Math.min(S * 0.07, 40)); g.globalAlpha = 1; }
+  drawDrips();
+  drawPops(now);
+  drawCutFx(now);
+}
+
+// ============================================================
+// The melt, the fall, the sea
+// ============================================================
+let fallFromMelt = false;
+function startMelt(now) {
+  mode = "melt"; phaseT = now; flight.melted = true; fallFromMelt = true;
+  if (audio) {
+    const a = audio, t = a.ac.currentTime;
+    for (const p of [a.o1.frequency, a.o2.frequency]) { p.cancelScheduledValues(t); p.setValueAtTime(p.value, t); p.exponentialRampToValueAtTime(25, t + MELT_TIME); }
+    glide(a.dg.gain, 0.3, 0.3); glide(a.ng.gain, 0.3, 0.5); glide(a.bp.frequency, 300, 1);
+  }
+}
+function drawMelt(now, dt) {
+  const u = (now - phaseT) / 1000 / MELT_TIME;
+  melt = E.melt = 1;
+  cur.def.draw(cur.s, (now - cur.t0) / 1000, dt);
+  if (Math.random() < 0.9) spawnDrip(undefined, true);
+  sun(CX, CY - S * 0.1 * u, S * lerp(0.15, 0.7, smooth(clamp(u, 0, 1))), "disc");
+  drawDrips();
+  if (Math.random() < u * 0.2) { g.fillStyle = Math.random() < 0.5 ? C.r : C.b3; g.globalAlpha = 0.25; g.fillRect(0, 0, W, H); g.globalAlpha = 1; }
+  g.fillStyle = C.r; g.globalAlpha = clamp((u - 0.75) * 4, 0, 1); g.fillRect(0, 0, W, H); g.globalAlpha = 1;
+  if (u >= 1) startFall(now, true);
+}
+function startFall(now, fromMelt) {
+  mode = "fall"; phaseT = now; fallFromMelt = fromMelt; drips = [];
+  if (fromMelt) flight.snaps.push(snapshot());
+  if (audio) {
+    const a = audio;
+    glide(a.dg.gain, 0, 0.3); glide(a.hg.gain, 0, 0.3);
+    glide(a.ng.gain, 0.06, 0.2); glide(a.bp.frequency, 500, 0.2);
+    a.ng.gain.setTargetAtTime(0.4, a.ac.currentTime + 0.3, (fromMelt ? FALL_TIME : 1) * 0.5);
+    a.bp.frequency.setTargetAtTime(1800, a.ac.currentTime + 0.3, (fromMelt ? FALL_TIME : 1) * 0.5);
+  }
+}
+// Down through collapsing versions of everything you climbed past, then the sea, then nothing
+function drawFall(now) {
+  const T = (now - phaseT) / 1000, ft = fallFromMelt ? FALL_TIME : 0.8;
+  bg();
+  if (T < ft) {
+    const snaps = flight.snaps.slice().reverse(), seg = ft / Math.max(1, snaps.length);
+    const i = Math.min(snaps.length - 1, Math.floor(T / seg)), u = (T - i * seg) / seg;
+    for (const j of [i - 1, i]) {
+      const sn = snaps[j];
+      if (!sn) continue;
+      const uu = j === i ? u : 1 + u, strips = 6, sh = H / strips;
+      for (let k = 0; k < strips; k++) {                // it comes apart in strips as it rushes up past you
+        const dy = -uu * H * 1.1 + H * 0.5 + k * sh + Math.sin(k * 3 + j) * uu * S * 0.05;
+        const dx = Math.sin(k * 7.1 + j) * uu * S * 0.12;
+        g.save(); g.globalAlpha = clamp(1.3 - uu, 0, 1);
+        g.translate(CX + dx, dy); g.rotate((hash(j * 9 + k) - 0.5) * uu * 0.5); g.scale(1 - uu * 0.25, 1 - uu * 0.25);
+        g.drawImage(sn, 0, (k / strips) * sn.height, sn.width, sn.height / strips, -W / 2, 0, W, sh + 1);
+        g.restore();
+      }
+    }
+    g.globalAlpha = 1;
+    const k = Math.floor(T * 6) % 2;
+    sun(CX + Math.sin(T * 3) * S * 0.2, H * (1.1 - (T / ft) * 1.3), S * 0.03, k ? "disc" : "wire");
+  } else if (T < ft + SEA_TIME) {
+    const u = (T - ft) / SEA_TIME, hy = H * lerp(0.05, 0.6, u);
+    g.strokeStyle = C.b;
+    for (let k = 1; k < 26; k++) {
+      const z = k - u * 8;
+      if (z <= 0.2) continue;
+      const y = hy + (S * 0.6) / z; if (y > H) continue;
+      g.lineWidth = Math.max(1, 4 / z); g.globalAlpha = clamp(1.2 - z / 26, 0, 1); g.beginPath();
+      for (let x = 0; x <= W; x += 16) { const yy = y + Math.sin(x * 0.02 + T * 3 + k) * (6 / z); x ? g.lineTo(x, yy) : g.moveTo(x, yy); }
+      g.stroke();
+    }
+    g.globalAlpha = 1;
+    if (audio && u > 0.9) glide(audio.ng.gain, 0, 0.05);
+  } else if (T > ft + SEA_TIME + DARK_TIME) startOracle(now);
+}
+
+// ============================================================
+// THE ORACLE: an 8-ball rising, somewhere odd (a motel pool at night, or a TV in an empty room)
+// ============================================================
+let oracle = null;
+const ICO_V = (() => {
+  const p = (1 + Math.sqrt(5)) / 2;
+  return [[-1, p, 0], [1, p, 0], [-1, -p, 0], [1, -p, 0], [0, -1, p], [0, 1, p], [0, -1, -p], [0, 1, -p], [p, 0, -1], [p, 0, 1], [-p, 0, -1], [-p, 0, 1]].map(a => { const l = Math.hypot(...a); return a.map(c => c / l); });
+})();
+const ICO_E = [];
+for (let i = 0; i < 12; i++) for (let j = i + 1; j < 12; j++) if (Math.hypot(...ICO_V[i].map((c, k) => c - ICO_V[j][k])) < 1.1) ICO_E.push([i, j]);
+function ball8(x, y, r, t) {
+  const gr = g.createRadialGradient(x - r * 0.25, y - r * 0.3, r * 0.1, x, y, r);
+  gr.addColorStop(0, C.b3); gr.addColorStop(1, "#000");
+  g.fillStyle = gr; g.beginPath(); g.arc(x, y, r, 0, 7); g.fill();
+  g.strokeStyle = C.b; g.lineWidth = 2; g.stroke();
+  const ay = t * 0.35, ax = 0.45 + Math.sin(t * 0.21) * 0.25, cy = Math.cos(ay), sy = Math.sin(ay), cx = Math.cos(ax), sx = Math.sin(ax);
+  const P = ICO_V.map(([a, b, c]) => { const x1 = a * cy + c * sy, z1 = -a * sy + c * cy, y1 = b * cx - z1 * sx, z2 = b * sx + z1 * cx, k = 3 / (3 + z2); return [x + x1 * r * 0.66 * k, y + y1 * r * 0.66 * k, z2]; });
+  for (const back of [true, false]) {
+    g.globalAlpha = back ? 0.3 : 1; g.lineWidth = back ? 1 : 2; g.beginPath();
+    for (const [i, j] of ICO_E) if ((P[i][2] + P[j][2] > 0) === back) { g.moveTo(P[i][0], P[i][1]); g.lineTo(P[j][0], P[j][1]); }
+    g.stroke();
+  }
+  g.globalAlpha = 1;
+}
+function startOracle(now) {
+  mode = "oracle";
+  const pickT = pickTruth(flight.melted || flight.secret, flight.secret);
+  oracle = { ...pickT, start: now, where: Math.random() < 0.5 ? "pool" : "tv", typed: 0, shown: false, spoken: false };
+  if (audio) { glide(audio.ng.gain, 0, 0.2); audio.sg.gain.setTargetAtTime(0.14, audio.ac.currentTime + 0.5, 1.2); }
+}
+function truthText(o, t, x, y, maxW, size) {
+  const text = o.truth.text, n = t < RISE_TIME ? 0 : Math.min(text.length, Math.floor(((t - RISE_TIME) * 1000) / LETTER_MS));
+  if (n > o.typed) { o.typed = n; if (text[n - 1] !== " ") tone("square", 1200, 1200, 0.02, 0.015); }
+  if (n === 0) return false;
+  g.font = `italic 700 ${size}px ${SF}`;
+  const lines = wrapText(text, maxW), glitch = n < text.length ? "αβγδλμπΣΦΨΩ"[(Math.random() * 11) | 0] : "";
+  let off = 0;
+  lines.forEach((ln, i) => {
+    const seen = Math.max(0, Math.min(ln.length, n - off)), part = ln.slice(0, seen) + (n - off >= 0 && n - off < ln.length ? glitch : "");
+    off += ln.length + 1;
+    if (part) olText(part, x, y + (i - (lines.length - 1) / 2) * size * 1.15, size);
+  });
+  return n >= text.length;
+}
+function drawOracle(now) {
+  const o = oracle, t = (now - o.start) / 1000, rise = smooth(clamp(t / RISE_TIME, 0, 1));
+  bg();
+  let bx, by, br;
+  if (o.where === "pool") {
+    const pw = Math.min(W * 0.92, H * 1.1), top = H * 0.42, bot = H * 0.95, x0 = CX;
+    const poly = [[x0 - pw * 0.34, top], [x0 + pw * 0.34, top], [x0 + pw * 0.5, bot], [x0 - pw * 0.5, bot]];
+    for (let i = 0; i < 14; i++) line((i / 13) * W, top - S * 0.14, (i / 13) * W, top - S * 0.02, C.b3, 2);           // the fence
+    line(0, top - S * 0.13, W, top - S * 0.13, C.b3, 2);
+    plain("NO LIFEGUARD ON DUTY", x0 + pw * 0.3, top - S * 0.09, Math.max(8, S * 0.018), C.r2, { font: TT });
+    g.save(); g.beginPath(); poly.forEach(([x, y], i) => (i ? g.lineTo(x, y) : g.moveTo(x, y))); g.closePath(); g.clip();
+    fillPat("pool", Math.sin(t * 0.7) * 6, t * 4, 0, top, W, bot - top);
+    g.strokeStyle = "rgba(58,58,255,.35)"; g.lineWidth = 2;
+    for (let k = 0; k < 9; k++) { g.beginPath(); for (let x = 0; x <= W; x += 20) { const yy = top + ((k + 0.5) * (bot - top)) / 9 + Math.sin(x * 0.03 + t * 1.5 + k) * 4; x ? g.lineTo(x, yy) : g.moveTo(x, yy); } g.stroke(); }
+    sun(x0 - pw * 0.25, top + (bot - top) * 0.2, S * 0.025, "disc");                                                    // the sun, a reflection
+    bx = x0; br = Math.min(pw * 0.14, S * 0.16); by = lerp(bot + br, top + (bot - top) * 0.48, rise) + Math.sin(t * 1.2) * 3;
+    for (let k = 0; k < 3; k++) { const ph = (t * 0.5 + k / 3) % 1, rr = br * (1.2 + ph * 1.6); g.strokeStyle = `rgba(58,58,255,${0.5 - ph * 0.5})`; g.beginPath(); g.ellipse(bx, by + br * 0.4, rr, rr * 0.3, 0, 0, 7); g.stroke(); }
+    ball8(bx, by, br, t);
+    g.restore();
+    g.strokeStyle = C.b; g.lineWidth = 3; g.beginPath(); poly.forEach(([x, y], i) => (i ? g.lineTo(x, y) : g.moveTo(x, y))); g.closePath(); g.stroke();
+    for (const dx of [0, pw * 0.05]) { const lx = x0 + pw * 0.26 + dx; g.beginPath(); g.moveTo(lx, top + S * 0.05); g.quadraticCurveTo(lx, top - S * 0.06, lx - pw * 0.03, top - S * 0.06); g.strokeStyle = C.r2; g.stroke(); }
+  } else {
+    const vx = CX, vy = H * 0.5, P = (x, y, z) => [vx + (x * S * 0.55) / z, vy + (y * S * 0.55) / z], far = 2.6;
+    const fl = Math.random() < 0.05 ? 0.7 : 1;                                                                           // the light flickers
+    g.save(); const a = P(-1.6, 1, 1), b = P(1.6, 1, 1), c = P(1.6, 1, far), d = P(-1.6, 1, far);
+    g.beginPath(); g.moveTo(a[0], a[1]); g.lineTo(b[0], b[1]); g.lineTo(c[0], c[1]); g.lineTo(d[0], d[1]); g.closePath(); g.clip(); fillPat("carpet", 0, 0); g.restore();
+    for (const [x, y] of [[-1.6, -1], [1.6, -1], [-1.6, 1], [1.6, 1]]) { const p = P(x, y, 0.55), q = P(x, y, far); line(p[0], p[1], q[0], q[1], C.b, 2); }
+    const e1 = P(-1.6, -1, far), e2 = P(1.6, 1, far); g.strokeStyle = C.b; g.lineWidth = 2; g.strokeRect(e1[0], e1[1], e2[0] - e1[0], e2[1] - e1[1]);
+    const q1 = P(-1.6, -0.6, 1.5), q2 = P(-1.6, -0.6, 2.1), q3 = P(-1.6, 0.1, 2.1), q4 = P(-1.6, 0.1, 1.5);         // a window on the left wall
+    g.beginPath(); g.moveTo(q1[0], q1[1]); g.lineTo(q2[0], q2[1]); g.lineTo(q3[0], q3[1]); g.lineTo(q4[0], q4[1]); g.closePath(); g.fillStyle = "#03031a"; g.fill(); g.strokeStyle = C.b; g.stroke();
+    sun((q1[0] + q3[0]) / 2, (q1[1] + q3[1]) / 2 + 4, S * 0.015, "disc");
+    const tw = Math.min(W * 0.62, S * 0.75), th = tw * 0.72, tx = vx - tw / 2, ty = H * 0.86 - th;
+    rrect(tx, ty, tw, th, tw * 0.05); g.fillStyle = "#000"; g.fill(); g.strokeStyle = C.b; g.lineWidth = 3; g.stroke();
+    line(vx, ty, vx - tw * 0.2, ty - th * 0.35, C.b, 2); line(vx, ty, vx + tw * 0.25, ty - th * 0.3, C.b, 2);
+    const sx = tx + tw * 0.06, sy = ty + th * 0.08, sw = tw * 0.72, sh = th * 0.82;
+    g.save(); rrect(sx, sy, sw, sh, sw * 0.06); g.clip();
+    g.fillStyle = "#020210"; g.fillRect(sx, sy, sw, sh);
+    if (t < 0.8 || Math.random() < 0.03) fillPat("static", Math.random() * 64, Math.random() * 64, sx, sy, sw, sh);
+    bx = sx + sw / 2; br = Math.min(sw, sh) * 0.32; by = lerp(sy + sh + br, sy + sh * 0.5, rise);
+    ball8(bx, by, br, t);
+    g.restore();
+    for (let k = 0; k < 3; k++) { g.beginPath(); g.arc(tx + tw * 0.89, ty + th * (0.2 + k * 0.18), tw * 0.03, 0, 7); g.strokeStyle = C.b; g.stroke(); }
+    if (fl < 1) { g.globalAlpha = 1 - fl; g.fillStyle = "#000"; g.fillRect(0, 0, W, H); g.globalAlpha = 1; }
+  }
+  o.ball = [bx, by, br];
+  const done = truthText(o, t, CX, H * (o.where === "pool" ? 0.2 : 0.14), Math.min(W * 0.88, 640), Math.min(S * 0.075, 46));
+  if (o.typed > 0 && !o.spoken) { o.spoken = true; speak(o.truth.text); }
+  if (done && !o.shown && t > RISE_TIME + (o.truth.text.length * LETTER_MS) / 1000 + 0.8) {
+    o.shown = true;
+    $("count").textContent = (o.final ? `ALL ${o.total} LEARNED · THE CYCLE BEGINS AGAIN` : `TRUTH ${String(o.learned).padStart(2, "0")} OF ${o.total} LEARNED`) + (o.hint ? ` · ${o.hint}` : "");
+    $("voice").textContent = voiceOn ? "voice: on" : "voice: off";
+    $("after").hidden = false;
+  }
+}
+
+// The share card: the truth on the 8-ball, in the site's look, as an image
+async function shareCard() {
+  if (!oracle) return;
+  const c = document.createElement("canvas"); c.width = 1080; c.height = 1350;
+  const prev = [g, W, H, S, CX, CY];
+  g = c.getContext("2d"); W = 1080; H = 1350; S = 1080; CX = 540; CY = 675;
+  try {
+    bg(); fillPat("stars", 0, 0, 0, 0, W, H, 0.7);
+    g.strokeStyle = C.r; g.lineWidth = 6; g.strokeRect(20, 20, W - 40, H - 40); g.lineWidth = 2; g.strokeRect(36, 36, W - 72, H - 72);
+    ball8(CX, 820, 300, 2.2);
+    g.font = `italic 700 84px ${SF}`;
+    const lines = wrapText(oracle.truth.text, 900);
+    lines.forEach((l, i) => olText(l, CX, 300 + (i - (lines.length - 1) / 2) * 96, 84));
+    plain(oracle.final ? "THE LAST TRUTH" : `TRUTH ${String(oracle.learned).padStart(2, "0")} OF ${oracle.total}`, CX, 1180, 30, C.b, { font: TT });
+    olText("ICARUS · LIVE.AND.DIE", CX, 1250, 44);
+  } finally { [g, W, H, S, CX, CY] = prev; }
+  const blob = await new Promise(res => c.toBlob(res, "image/png"));
+  if (!blob) return;
+  const file = new File([blob], "icarus-truth.png", { type: "image/png" });
+  try { if (navigator.canShare?.({ files: [file] })) { await navigator.share({ files: [file], title: "ICARUS", text: oracle.truth.text }); return; } }
+  catch (e) { if (e.name === "AbortError") return; }
+  const url = URL.createObjectURL(file), a = document.createElement("a");
+  a.href = url; a.download = file.name; document.body.appendChild(a); a.click(); a.remove();
+  setTimeout(() => URL.revokeObjectURL(url), 4000);
+}
+
+async function showTruths() {
+  const d = await loadTruths(), s = loadSeen();
+  const rows = [...d.truths.map(t => [t, false]), ...d.deep.map(t => [t, true]), [d.final, false]];
+  const table = $("truthsTable"); table.textContent = "";
+  let known = 0;
+  rows.forEach(([t, deep], i) => {
+    const has = s.ever.includes(t.id);
+    if (has && t !== d.final) known++;
+    const tr = document.createElement("tr"); tr.className = has ? "" : "unk";
+    const n = document.createElement("td"), x = document.createElement("td");
+    n.textContent = t === d.final ? "∞" : (deep ? "D" : "") + String(i + 1 - (deep ? d.truths.length : 0)).padStart(2, "0");
+    x.textContent = has ? t.text : "█".repeat(Math.max(4, Math.round(t.text.length * 0.8)));
+    tr.append(n, x); table.append(tr);
+  });
+  $("truthsCount").textContent = `${known} OF ${d.truths.length + d.deep.length} LEARNED`;
+  $("truthsPage").hidden = false;
+}
+
+// ============================================================
+// Main loop
+// ============================================================
+function drawStart(now) {
+  const t = now / 1000;
+  bg(); fillPat("stars", t * 4, -t * 2, 0, 0, W, H, 0.35);
+  E.melt = 0;
+  sun(CX, CY - S * 0.05, S * 0.18, "wire");
+}
+function frame(now) {
+  requestAnimationFrame(frame);
+  const dt = Math.min((now - lastT) / 1000, 0.1);
+  lastT = now;
+  E.t = now / 1000;
+  g.setTransform(DPR, 0, 0, DPR, 0, 0);
+  if (mode === "start") { drawStart(now); return; }
+  if (mode === "fly") updateFly(now, dt);
+  if (mode === "secret") { readInput(now, dt); if ((now - cur.t0) / 1000 > 7) endSecret(); }
+  updateDrips(dt);
+  if (hold > 0) { hold -= dt; return; }               // it waits (the last frame stays up)
+  if (mode === "fly" || mode === "secret") drawFly(now, dt);
+  else if (mode === "melt") drawMelt(now, dt);
+  else if (mode === "fall") drawFall(now);
+  else if (mode === "oracle") drawOracle(now);
+}
+
+// ============================================================
+// Setup
+// ============================================================
+$("go").onclick = async () => {
+  const motion = requestMotion();           // iOS: the permission prompt only works inside the tap
+  primeSpeech();                            // speech also needs a tap first
+  try { audio = initAudio(); await audio.ac.resume(); } catch (e) { audio = null; }
+  await motion;
+  await loadTruths();
+  gyro.calibrate = true;
+  $("start").hidden = true;
+  newFlight();
+  mode = "fly";
+};
+$("again").onclick = () => {
+  $("after").hidden = true; $("truthsPage").hidden = true;
+  try { speechSynthesis.cancel(); } catch (e) { /* no voice */ }
+  if (audio) { glide(audio.sg.gain, 0, 0.3); const t = audio.ac.currentTime; for (const p of [audio.o1.frequency, audio.o2.frequency]) { p.cancelScheduledValues(t); p.setValueAtTime(55, t); } }
+  oracle = null; gyro.calibrate = true;
+  newFlight(); mode = "fly";
+};
+$("share").onclick = () => shareCard();
+$("tlist").onclick = () => showTruths();
+$("truthsClose").onclick = () => { $("truthsPage").hidden = true; };
+$("voice").onclick = () => {
+  voiceOn = !voiceOn;
+  try { localStorage.setItem(VOICE_KEY, voiceOn ? "1" : "0"); } catch (e) { /* private mode */ }
+  $("voice").textContent = voiceOn ? "voice: on" : "voice: off";
+  if (!voiceOn) { try { speechSynthesis.cancel(); } catch (e) { /* no voice */ } } else if (oracle) speak(oracle.truth.text);
+};
+document.addEventListener("visibilitychange", () => { if (!document.hidden && audio) audio.ac.resume(); });
+requestAnimationFrame(frame);
+</script>
+</body>
+</html>
