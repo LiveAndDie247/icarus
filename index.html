@@ -34,6 +34,8 @@
   button:active { background: #f00; color: #000; }
   button:disabled { opacity: .45; }
 
+  .home { font: 700 13px "Courier New", Courier, monospace; color: #f00; letter-spacing: .1em; padding: 12px 16px; text-decoration: underline; }
+  .home:active { background: #f00; color: #000; }
   #flew { font: 300 64px "Courier New", Courier, monospace; color: #f00; letter-spacing: .06em; font-variant-numeric: tabular-nums; text-shadow: 0 0 12px rgba(255, 0, 0, .6); }
 </style>
 </head>
@@ -44,12 +46,14 @@
 <!-- First screen: one button. It unlocks audio, asks for motion access and sets "level". -->
 <div id="intro" class="screen">
   <button id="reach">Reach up</button>
+  <a class="home" href="https://liveanddie.xyz/">← liveanddie.xyz</a>
 </div>
 
 <!-- After a flight: duration and Fly again. Nothing else. -->
 <div id="results" class="screen hidden">
   <div id="flew">0.0s</div>
   <button id="again">Fly again</button>
+  <a class="home" href="https://liveanddie.xyz/">← liveanddie.xyz</a>
 </div>
 
 <script type="module">
