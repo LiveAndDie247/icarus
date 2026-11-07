@@ -17,107 +17,17 @@
 <meta name="twitter:card" content="summary_large_image">
 <meta name="twitter:image" content="https://liveanddie247.github.io/icarus/og.png">
 <style>
-  /* LIVE.AND.DIE skin: the site's palette, Times + Courier, double red borders, the inv blink */
-  :root { --r: #ff0000; --r2: #aa0000; --r3: #4a0000; --b: #3a3aff; --b2: #2222cc; --b3: #101060;
-          --sf: "Times New Roman", Times, "Liberation Serif", serif; --tt: "Courier New", Courier, monospace; }
-  * { box-sizing: border-box; margin: 0; padding: 0; }
-  html, body {
-    height: 100%; background: #000; color: var(--b); overflow: hidden;
-    font-family: var(--sf);
-    touch-action: manipulation; user-select: none; -webkit-user-select: none;
-  }
-  [hidden] { display: none !important; }
-  /* Canvas fills the screen; its resolution follows the screen's aspect (see fit()) */
-  canvas { display: block; position: fixed; inset: 0; width: 100%; height: 100%; }
-  @keyframes inv { 0%, 49% { background: var(--r); color: #000 } 50%, 100% { background: var(--b); color: #000 } }
-  @keyframes blink { 0%, 49% { opacity: 1 } 50%, 100% { opacity: 0 } }
-  .ol { text-shadow: 1px 0 #000, -1px 0 #000, 0 1px #000, 0 -1px #000, 2px 2px 0 #000; }
-
-  .screen {
-    position: fixed; inset: 0; display: flex; flex-direction: column;
-    align-items: center; justify-content: center; gap: 14px; padding: 16px; text-align: center;
-  }
-  .hidden { display: none; }
-  #intro { background: rgba(0, 0, 0, .55); }
-  .corp { font: 10px var(--tt); color: var(--r2); letter-spacing: .3em; text-transform: uppercase; }
-  .title {
-    font: italic 700 clamp(56px, 15vmin, 120px)/.9 var(--sf); color: var(--r); letter-spacing: .02em;
-    text-shadow: 2px 0 #000, -2px 0 #000, 0 2px #000, 0 -2px #000, 6px 6px 0 var(--b);
-  }
-  .tag { font: italic 15px var(--sf); color: var(--b); max-width: 34em; }
-  .tag b { color: var(--r); font-style: normal; }
-
-  button {
-    font: italic 700 22px var(--sf); color: var(--r); background: #000; letter-spacing: .04em;
-    border: 3px double var(--r); outline: 1px solid var(--r3); outline-offset: 3px; border-radius: 0;
-    min-height: 52px; padding: 8px 34px; min-width: 220px; cursor: pointer; text-transform: uppercase;
-    text-shadow: 1px 1px 0 #000, 2px 2px 0 var(--r3);
-  }
-  button:active, button:hover { background: var(--r); color: #000; text-shadow: none; }
-  button:disabled { animation: inv .6s steps(1) infinite; color: #000; text-shadow: none; }
-  button.cell {
-    font: 700 11px var(--tt); letter-spacing: .2em; color: var(--b); border: 1px solid var(--b3);
-    outline: 0; min-height: 40px; min-width: 0; padding: 6px 14px; text-shadow: none; font-style: normal;
-  }
-  button.cell:active, button.cell:hover { background: var(--b); color: #000; }
-  .row { display: flex; gap: 8px; flex-wrap: wrap; justify-content: center; }
-
-  /* After a flight: the Oracle is on the canvas; only the buttons sit under it */
-  #results { justify-content: flex-end; padding-bottom: 18px; pointer-events: none; gap: 10px; }
-  #results > * { pointer-events: auto; }
-  #flew { font: 10px var(--tt); color: var(--r2); letter-spacing: .2em; text-transform: uppercase; }
-
-  .home { font: 700 12px var(--tt); color: var(--r); letter-spacing: .1em; padding: 10px 14px; text-decoration: underline; }
-  .home:active, .home:hover { background: var(--b); color: #000; text-decoration: none; }
-
-  /* TRUTHS: a table in the site's style */
-  #truthsPage { background: #000; overflow-y: auto; justify-content: flex-start; padding-top: 28px; }
-  #truthsPage .list { width: min(560px, 100%); border: 3px double var(--r); outline: 1px solid var(--r3); outline-offset: 3px; padding: 14px; }
-  #truthsPage h2 { font: italic 700 40px var(--sf); color: var(--r); text-shadow: 2px 0 #000, -2px 0 #000, 0 2px #000, 0 -2px #000, 4px 4px 0 var(--b); margin: 4px 0 2px; }
-  #truthsCount { font: 10px var(--tt); color: var(--r2); letter-spacing: .2em; margin-bottom: 10px; }
-  #truthsTable { width: 100%; border-collapse: collapse; text-align: left; }
-  #truthsTable td { border: 1px solid var(--b3); padding: 6px 8px; font: italic 15px var(--sf); color: var(--b); }
-  #truthsTable td:first-child { font: 10px var(--tt); color: var(--r2); width: 3.5em; font-style: normal; }
-  #truthsTable tr.unk td:last-child { color: var(--b3); font-style: normal; letter-spacing: -.05em; }
-  #truthsTable tr.deep td:first-child { color: var(--r); }
+  /* A red LED panel: the game draws a 384x224 picture and it's shown with hard, chunky pixels,
+     letterboxed in black. Everything on it (menus included) is drawn by the game itself. */
+  html, body { height: 100%; margin: 0; background: #000; overflow: hidden;
+               touch-action: none; user-select: none; -webkit-user-select: none; -webkit-touch-callout: none; }
+  canvas { position: fixed; left: 50%; top: 50%; transform: translate(-50%, -50%);
+           image-rendering: crisp-edges; image-rendering: pixelated; background: #000; }
 </style>
 </head>
 <body>
-
-<canvas id="canvas" width="720" height="1280"></canvas>
-
-<!-- First screen. Reach up unlocks audio + speech, asks for motion access and sets "level". -->
-<div id="intro" class="screen">
-  <div class="corp">LIVE.AND.DIE · flight division · est. never</div>
-  <h1 class="title">ICARUS</h1>
-  <div class="tag">tilt to climb. roll to turn. fly the highway to the sun.<br><b>get close. burn. fall.</b> the oracle is waiting at the bottom.</div>
-  <button id="reach">Reach up</button>
-  <button id="truthsBtn" class="cell">TRUTHS</button>
-  <a class="home" href="https://liveanddie.xyz/">← liveanddie.xyz</a>
-</div>
-
-<!-- After a flight: the Oracle speaks on the canvas; these sit under it -->
-<div id="results" class="screen hidden">
-  <button id="again">Fly again</button>
-  <div class="row">
-    <button id="voiceBtn" class="cell">VOICE: ON</button>
-    <button id="saveClip" class="cell" hidden>SAVE CLIP</button>
-    <button id="truthsBtn2" class="cell">TRUTHS</button>
-  </div>
-  <div id="flew"></div>
-  <a class="home" href="https://liveanddie.xyz/">← liveanddie.xyz</a>
-</div>
-
-<!-- Learned truths; the rest blacked out -->
-<div id="truthsPage" class="screen" hidden>
-  <div class="list">
-    <div class="corp">LIVE.AND.DIE · oracle records</div>
-    <h2>TRUTHS</h2>
-    <div id="truthsCount"></div>
-    <table id="truthsTable"></table>
-  </div>
-  <button id="truthsClose" class="cell">CLOSE</button>
-</div>
+<canvas id="canvas" width="1152" height="672"></canvas>
+<noscript><p style="color:#f00;font:16px monospace;text-align:center">ICARUS needs JavaScript. <a style="color:#f00" href="https://liveanddie.xyz/">← liveanddie.xyz</a></p></noscript>
 
 <script type="module">
 // ============================================================
@@ -158,19 +68,23 @@ const HEAT_DB = 6;            // extra gain at full heat (the moment before the 
 const MELT_OCTAVES = 2.5;     // how far the pitch falls during the melt
 const SEA_AFTER_GAIN = 0.08;  // quiet sea tone that returns after the fall
 
-// Canvas
-// Long side is always 1280; the short side follows the screen's aspect (fit() sets these)
-let W = 720, H = 1280;
+// The screen. The game thinks in a virtual 1280x747 landscape screen (all the pixel sizes below);
+// it is drawn onto a 384x224 red LED panel (FBS maps one onto the other).
+const FB_W = 384, FB_H = 224, FBS = FB_W / 1280;
+const W = 1280, H = Math.round(1280 * FB_H / FB_W);   // 747
 const SUN_MIN_R = 50;
-let SUN_MAX_R = Math.max(W, H) * 0.8;    // up close it fills the screen
-let SUN_FACE_R = Math.min(W, H) * 0.317; // the size at which its face is fully resolved
+const SUN_MAX_R = W * 0.8;               // up close it fills the screen
+const SUN_FACE_R = H * 0.317;            // the size at which its face is fully resolved
+const STEREO_KEY = "icarus.3d.v1";
+let stereo = false;                      // side-by-side 3D for a cardboard viewer
+try { stereo = localStorage.getItem(STEREO_KEY) === "1"; } catch (e) { /* private mode */ }
 
 // First-person flight. World axes: x right, y up (ground at 0), z forward.
 // Red wireframe vectors on black.
 const RED = "rgb(255, 0, 0)";
 const FOCAL = 560;                    // px per world unit at distance 1
 const NEAR = 0.15;                    // near clip plane
-let PITCH_MAX = Math.atan((H / 2 - 60) / FOCAL);   // near the sun the horizon sits at the bottom edge
+const PITCH_MAX = Math.atan((H / 2 - 60) / FOCAL);   // near the sun the horizon sits at the bottom edge
 const CAM_H_SEA = 0.45, CAM_H_TOP = 64;              // eye height over the ground: the world shrinks far below
 const SPEED_BASE = 4, SPEED_ALT = 10;                // forward speed when hovering, + extra at the top
 const BANK_MAX = 0.6;                 // radians of camera roll at full phone roll
@@ -185,7 +99,7 @@ const SUN_X = 0, SUN_Y = 56, SUN_Z = 280;
 const SUN_WORLD_R = 42;               // its radius in world units (sets how big it looks at a distance)
 const AIM_CONE = 30 * Math.PI / 180;  // how centred the sun is (drives the shimmer and the glitch)
 const CORONA_N = 48;                  // flame tongues round the limb
-const GRID = 2, GRID_LINES = 28;      // ground grid spacing, lines per axis
+const GRID = 3, GRID_LINES = 20;      // ground grid spacing, lines per axis (coarse: it's a 384-wide panel)
 const VIEW_FAR = 56;                  // depth-fade distance
 const CLOUD_N = 6, SPEED_N = 50;
 const RIDGE_D = 50, RIDGE_N = 96;     // far skyline: distance, segments all the way round
@@ -248,7 +162,7 @@ const VISOR_RATE = 3;                 // drops / s at full heat
 
 // The renderer fails at high heat
 const GLITCH_FROM = 0.4;              // heat where it starts; worst at full heat
-const GREEK = "αβγδεζηθικλμνξοπρστυφχψωΓΔΘΛΞΠΣΦΨΩ";
+const GREEK = "ΓΔΘΛΞΠΣΦΨΩαβδλμπ";   // the Greek the panel's font has
 
 // Greek rain, behind everything
 const RAIN_MAX = 30;                  // columns at full density
@@ -260,23 +174,19 @@ const HAND_BASE = [0.42, -0.62, 1.0]; // right hand's wrist in camera space (lef
 const HAND_SCALE = 0.42;              // hand length in camera units
 const HAND_PITCH = 0.6;               // fingers tipped forward, away from you (radians about x)
 const HAND_INWARD = 0.25;             // tilted in toward the centre (radians about z)
-const BONE = "rgb(255, 215, 200)";    // white-red bones
-const CHAR = "rgb(255, 120, 40)";     // flesh about to burn
 const BURN_TIP = 0.15, BURN_WRIST = 0.95;            // burn amount where fingertips / wrist flesh burns away
 const BURN_LIVE = 0.3;                // how far the sun's heat alone chars them (the rest burns in the fall)
 const BURN_FALL_END = 0.72;           // fraction of the fall by which the hands are bone
 const FRAG_CAP = 160;                 // burnt flesh fragments in the air
 const EMBER_CAP = 220;                // sparks rising off the burning edge
-const HAND_GLOW = "rgba(255, 40, 20, 0.14)";
 const COVER_IN = 0.8;                 // melt: seconds for the hands to rise over the camera
 const COVER_OUT_AT = FALL_TIME - 1.2, COVER_OUT = 0.6;   // ...and when / how fast they drop away
 const FEATHER_CAP = 50;
 const WAX_CAP = 110;
-const WAX_COLORS = ["rgb(255, 70, 30)", "rgb(255, 105, 40)", "rgb(235, 45, 25)", "rgb(255, 135, 60)"];
+const WAX_COLORS = [255, 170, 255, 170];   // brightness levels on the panel
 
 // ---------- v3: the highway (all in world units) ----------
-const BLUE = "rgb(58, 58, 255)";      // the site's --b
-const SF = '"Times New Roman", Times, "Liberation Serif", serif';
+const SF = '"Times New Roman", Times, "Liberation Serif", serif';   // (the title logo only)
 const HWY_SPACING = 48;               // parallel highways every this far across x: wherever you turn, there's a road
 const HWY_HALF = 3.2, DASH = 2;       // road half-width, centre-line dash length
 const POLE_GAP = 7, POLE_X = 6.4, POLE_H = 3.4, ARM = 0.75, WIRE_SAG = 0.5;   // telephone poles + wires
@@ -317,23 +227,22 @@ const CLIP_TAIL = 3;                  // seconds the clip holds on the truth onc
 const $ = id => document.getElementById(id);
 const canvas = $("canvas"), ctx = canvas.getContext("2d");
 
-// Size the canvas to the screen: long side 1280, short side matching the aspect
+// The visible canvas: the panel upscaled x3 (x2 per eye in 3D), shown as large as fits, letterboxed.
+// (It's also what the clip records, so shares stay crisp.)
 function fit() {
-  const iw = innerWidth || 720, ih = innerHeight || 1280;
-  if (iw >= ih) { W = 1280; H = Math.round(1280 * ih / iw); }
-  else { H = 1280; W = Math.round(1280 * iw / ih); }
-  if (canvas.width !== W) canvas.width = W;
-  if (canvas.height !== H) canvas.height = H;
-  SUN_MAX_R = Math.max(W, H) * 0.8;
-  SUN_FACE_R = Math.min(W, H) * 0.317;
-  PITCH_MAX = Math.atan((H / 2 - 60) / FOCAL);
+  const eyes = stereo ? 2 : 1, k = stereo ? 2 : 3;
+  const cw = FB_W * eyes * k, ch = FB_H * k;
+  if (canvas.width !== cw) canvas.width = cw;
+  if (canvas.height !== ch) canvas.height = ch;
+  const iw = innerWidth || cw, ih = innerHeight || ch, sc = Math.min(iw / cw, ih / ch);
+  canvas.style.width = Math.floor(cw * sc) + "px";
+  canvas.style.height = Math.floor(ch * sc) + "px";
+  ctx.imageSmoothingEnabled = false;
 }
-fit();
-addEventListener("resize", fit);
-if (screen.orientation) screen.orientation.addEventListener("change", fit);
+const portrait = () => innerHeight > innerWidth * 1.05;
 let audio = null;
 
-let mode = "intro";           // intro | live | melt | oracle
+let mode = "title";           // title | boot | warning | align | live | melt | oracle
 let altitude = 0;             // 0..1, a physics value driven by the phone's pitch
 let altVel = 0;               // altitude units / s
 let heat = 0;                 // 0..1
@@ -380,7 +289,6 @@ let lieTextUntil = 0;
 let fallWhispered = false;
 
 let visorDrops = [];                  // wax on the lens
-let blurCanvas = null, blurCtx = null;
 let stutterLeft = 0;                  // frames to hold (renderer failing)
 let tilt = null;                      // { start, end, amt }: the horizon tilting on its own
 
@@ -390,6 +298,8 @@ let handPtsScreen = [];               // a few screen points on the hands, for f
 const burnt = new Set();              // flesh segment ids already burnt off (so fragments spawn once)
 let frags = [];                       // burnt flesh falling away: { cx, cy, hx, hy, vx, vy, spin, life, max }
 let rain = [];                        // Greek rain columns
+let lastScore = 0;                    // highest altitude of the last flight (0..1)
+const scoreOf = a => String(Math.round(a * 9999)).padStart(4, "0");
 
 // Wire scenery in world coordinates (spawned ahead along the current heading; recycled as it passes)
 const cloudShapes = Array.from({ length: CLOUD_N }, (_, i) => spawnCloud({}, 8 + i * 8 + Math.random() * 4));
@@ -715,10 +625,11 @@ function initAudio() {
   };
   const n = node;
 
-  n.osc1.type = "triangle";     // the clean, pure core
-  n.osc2.type = "sawtooth";     // brightness, brought in by the sun
-  n.sub.type  = "sine";
-  n.shim.type = "sine";         // one octave up, for shimmer
+  // Chip voices only: triangle + square, and the noise channel below
+  n.osc1.type = "triangle";     // the clean core
+  n.osc2.type = "square";       // brightness, brought in by the sun
+  n.sub.type  = "triangle";
+  n.shim.type = "square";       // one octave up, for shimmer
 
   n.g1.gain.value = 0.5; n.g2.gain.value = 0; n.gSub.gain.value = 0.4; n.gShim.gain.value = 0;
   n.filter.type = "lowpass"; n.filter.frequency.value = 300; n.filter.Q.value = 0.8;
@@ -727,7 +638,7 @@ function initAudio() {
   n.amp.gain.value = 0;
   n.reverb.buffer = makeImpulse(ac, 2.2, 3);
   n.hall.buffer = makeImpulse(ac, 5.5, 2);
-  n.revSend.gain.value = 0.3; n.hallSend.gain.value = 0;
+  n.revSend.gain.value = 0.12; n.hallSend.gain.value = 0;
   n.master.gain.value = 0.6;
   // Safety limiter only: high threshold so the heat swell isn't squashed
   n.comp.threshold.value = -6; n.comp.knee.value = 6; n.comp.ratio.value = 3;
@@ -750,15 +661,20 @@ function initAudio() {
   n.amp.connect(n.revSend).connect(n.reverb).connect(n.master);
   n.amp.connect(n.hallSend).connect(n.hall).connect(n.master);
 
-  n.engine.type = "sawtooth"; n.engine.frequency.value = 50;
+  n.engine.type = "square"; n.engine.frequency.value = 50;
   n.engFilter.type = "lowpass"; n.engFilter.frequency.value = 400; n.engFilter.Q.value = 2;
   n.engGain.gain.value = 0;
   n.engine.connect(n.engFilter).connect(n.engGain).connect(n.master);
 
+  // The noise channel: a 15-bit LFSR, each value held for a few samples (that gritty chip hiss)
   const noise = ac.createBuffer(2, ac.sampleRate * 2, ac.sampleRate);
   for (let ch = 0; ch < 2; ch++) {
     const d = noise.getChannelData(ch);
-    for (let i = 0; i < d.length; i++) d[i] = Math.random() * 2 - 1;
+    let lfsr = 0x4a3 + ch * 977, v = 0;
+    for (let i = 0; i < d.length; i++) {
+      if (i % 5 === 0) { const bit = (lfsr ^ (lfsr >> 1)) & 1; lfsr = (lfsr >> 1) | (bit << 14); v = lfsr & 1 ? 0.8 : -0.8; }
+      d[i] = v;
+    }
   }
   n.wind.buffer = noise; n.wind.loop = true;
   n.windFilter.type = "bandpass"; n.windFilter.frequency.value = 300; n.windFilter.Q.value = 0.7;
@@ -768,7 +684,7 @@ function initAudio() {
   n.noiseBuf = noise;                           // reused by the whispers
 
   // The father: into the main voice chain, so the filter, reverb and melt collapse apply to him too
-  n.drone1.type = "sine"; n.drone2.type = "triangle";
+  n.drone1.type = "triangle"; n.drone2.type = "square";
   n.drone1.detune.value = n.drone2.detune.value = -DRONE_FLAT;
   n.droneG2.gain.value = 0.6; n.droneGain.gain.value = 0;
   n.drone1.connect(n.droneGain);
@@ -776,7 +692,7 @@ function initAudio() {
   n.droneGain.connect(n.mix);
 
   // The sun: skips the filter (like the shimmer), trembling
-  n.sunV1.type = n.sunV2.type = "sine";
+  n.sunV1.type = n.sunV2.type = "square";   // the sun's sizzle
   n.sunGain.gain.value = 0;
   n.sunTrem.frequency.value = 6.5; n.sunTremDepth.gain.value = 0;
   n.sunV1.connect(n.sunGain); n.sunV2.connect(n.sunGain);
@@ -793,14 +709,14 @@ function initAudio() {
   n.roarGain.connect(n.master); n.roarGain.connect(n.hall);
   n.roar.start();
   // The rumble: two sub sines a few Hz apart, beating slowly
-  n.rumble.type = n.rumble2.type = "sine";
+  n.rumble.type = n.rumble2.type = "triangle";
   n.rumble.frequency.value = 31; n.rumble2.frequency.value = 34.5;
   n.rumbleGain.gain.value = 0;
   n.rumble.connect(n.rumbleGain); n.rumble2.connect(n.rumbleGain);
   n.rumbleGain.connect(n.master);
 
   // Power lines: 60 Hz mains hum + its buzzy 120 Hz overtone, through a bandpass
-  n.hum1.type = "sawtooth"; n.hum1.frequency.value = 60;
+  n.hum1.type = "square"; n.hum1.frequency.value = 60;
   n.hum2.type = "square"; n.hum2.frequency.value = 120;
   n.humFilter.type = "bandpass"; n.humFilter.frequency.value = 180; n.humFilter.Q.value = 1.5;
   n.humGain.gain.value = 0;
@@ -818,7 +734,7 @@ function initAudio() {
   n.neonGain.gain.value = 0;
   n.neon.connect(n.neonFilter).connect(n.neonGain).connect(n.master);
   // The Oracle's sub: E1 and a fifth above, very quiet, into the hall
-  n.oracle1.type = n.oracle2.type = "sine";
+  n.oracle1.type = n.oracle2.type = "triangle";
   n.oracle1.frequency.value = 41.2; n.oracle2.frequency.value = 61.7;
   n.oracleGain.gain.value = 0;
   n.oracle1.connect(n.oracleGain); n.oracle2.connect(n.oracleGain);
@@ -906,7 +822,7 @@ function updateVoice(handsVisible, dt = 1 / 60) {
   if (altitude < SEA_LINE) {
     // SEA: one low muffled tone with a slow underwater wobble
     semis = 0; cutoff = 260; q = 1.2; saw = 0.25; sub = 0.5; shim = 0;
-    rev = 0.4; hall = 0; wobP = 14; wobF = 140; spread = 4; vib = 0;
+    rev = 0.15; hall = 0; wobP = 14; wobF = 140; spread = 4; vib = 0;
   } else {
     // SKY: pitch climbs with altitude, pure (triangle + sine, low lowpass, no saw).
     // NEAR THE SUN: the melody sinks back into the root and the voice comes apart:
@@ -918,10 +834,10 @@ function updateVoice(handsVisible, dt = 1 / 60) {
     const sky = clamp((altitude - SEA_LINE) / (SUN_LINE - SEA_LINE), 0, 1);
     cutoff = lerp(lerp(700, 1500, sky), 5200, h * h);
     q = lerp(0.5, 7, h * h);                                // resonance rises: a whistle on the edge
-    saw = h * 0.45;
+    saw = h * 0.3;
     sub = lerp(0.28, 0.55, h);
-    shim = h * h * 0.12;
-    rev = 0.22 + h * 0.2;
+    shim = h * h * 0.06;
+    rev = 0.08 + h * 0.12;
     hall = Math.pow(h, 1.3) * 1.0;                          // long hall opens as you near it
     wobP = h * h * 30; wobF = h * 300;                      // the slow underwater wobble returns, bigger
     spread = 3 + h * 70;                                    // detune: a beating cluster
@@ -1048,6 +964,54 @@ function oracleAudio() {
 
 function silence() { glide(audio.amp.gain, 0, 0.15); }
 
+// ---------- One-shot chip sounds ----------
+function chipNote(type, f0, f1, dur, gain, delay = 0) {
+  if (!audio) return;
+  const a = audio, t = a.ac.currentTime + delay;
+  const o = a.ac.createOscillator(), g = a.ac.createGain();
+  o.type = type; o.frequency.setValueAtTime(f0, t);
+  if (f1 !== f0) o.frequency.exponentialRampToValueAtTime(f1, t + dur);
+  g.gain.setValueAtTime(gain, t); g.gain.setValueAtTime(0, t + dur);   // hard on, hard off: chip envelope
+  o.connect(g).connect(a.master);
+  o.start(t); o.stop(t + dur + 0.02);
+}
+function chipNoise(dur, gain, rate0 = 1, rate1 = 0.2, delay = 0) {
+  if (!audio) return;
+  const a = audio, t = a.ac.currentTime + delay;
+  const s = a.ac.createBufferSource(), g = a.ac.createGain();
+  s.buffer = a.noiseBuf; s.playbackRate.setValueAtTime(rate0, t); s.playbackRate.exponentialRampToValueAtTime(rate1, t + dur);
+  g.gain.setValueAtTime(gain, t); g.gain.linearRampToValueAtTime(0, t + dur);
+  s.connect(g).connect(a.master);
+  s.start(t, Math.random()); s.stop(t + dur + 0.02);
+}
+const blip = () => { chipNote("square", 660, 660, 0.04, 0.06); chipNote("square", 990, 990, 0.05, 0.06, 0.045); };
+const letterBeep = i => chipNote("square", i % 2 ? 1320 : 990, i % 2 ? 1320 : 990, 0.022, 0.03);
+// The crash (the melt) and the splash (the water)
+function chipCrash() { chipNoise(1.4, 0.32, 1, 0.1); chipNote("square", 440, 55, 0.9, 0.12); chipNote("triangle", 220, 30, 1.2, 0.25); }
+function chipSplash() { chipNoise(0.9, 0.3, 0.6, 0.05); chipNote("triangle", 110, 28, 0.6, 0.3); }
+// Under the spoken truth: the machine's speaker. (The browser's speech voice can't be routed through
+// Web Audio, so it can't be bitcrushed itself; instead it plays over a buzz + hiss, with a click per word.)
+let speechBedNodes = null;
+function speechBed(on) {
+  if (!audio) return;
+  const a = audio, t = a.ac.currentTime;
+  if (on && !speechBedNodes) {
+    const o = a.ac.createOscillator(), n = a.ac.createBufferSource(), hp = a.ac.createBiquadFilter(), g = a.ac.createGain();
+    o.type = "square"; o.frequency.value = 50;
+    n.buffer = a.noiseBuf; n.loop = true; n.playbackRate.value = 1.6;
+    hp.type = "highpass"; hp.frequency.value = 3000;
+    g.gain.setValueAtTime(0, t); g.gain.linearRampToValueAtTime(0.018, t + 0.05);
+    o.connect(g); n.connect(hp).connect(g); g.connect(a.master);
+    o.start(t); n.start(t);
+    speechBedNodes = { o, n, g };
+  } else if (!on && speechBedNodes) {
+    const { o, n, g } = speechBedNodes;
+    g.gain.setValueAtTime(g.gain.value, t); g.gain.linearRampToValueAtTime(0, t + 0.1);
+    o.stop(t + 0.15); n.stop(t + 0.15);
+    speechBedNodes = null;
+  }
+}
+
 // A whispered syllable for each line of text: a hiss, then a gliding vowel formant,
 // filtered noise shaped by short envelopes, with a little reverb.
 const VOWELS = [[700, 1200], [400, 2200], [300, 900], [600, 1700], [500, 1000]];
@@ -1149,6 +1113,9 @@ function speakTruth(text) {
     ttsVoice = ttsVoice || pickVoice();
     if (ttsVoice) { u.voice = ttsVoice; u.lang = ttsVoice.lang; }
     u.pitch = 0.6; u.rate = 0.8; u.volume = 1;
+    u.onstart = () => speechBed(true);
+    u.onend = u.onerror = () => speechBed(false);
+    u.onboundary = () => chipNote("square", 2200, 2200, 0.012, 0.02);
     speechSynthesis.speak(u);
   } catch (e) { console.warn("Speech failed", e); }
 }
@@ -1176,7 +1143,7 @@ function startRecording() {
       lastClip = recChunks.length ? new Blob(recChunks, { type }) : null;
       recChunks = []; recorder = null;
       for (const t of stream.getVideoTracks()) t.stop();       // (the audio track belongs to the recDest: keep it)
-      if (lastClip) $("saveClip").hidden = false;
+      // (SAVE CLIP appears in the Oracle's menu once lastClip exists)
     };
     recorder.start(1000);
   } catch (e) { console.warn("Recording failed", e); recorder = null; }
@@ -1194,33 +1161,28 @@ async function saveClip() {
   setTimeout(() => URL.revokeObjectURL(url), 4000);
 }
 
-// ---------- TRUTHS: what you've learned; the rest blacked out ----------
+// ---------- TRUTHS: what you've learned; the rest blacked out (a paged list on the panel) ----------
+let truthsView = null;                // { page, rows, count } while the TRUTHS pages are open
 async function showTruths() {
   const d = await loadTruths(), s = loadSeen();
   const rows = [...d.truths.map(t => [t, false]), ...d.deep.map(t => [t, true]), [d.final, false]];
-  const table = $("truthsTable");
-  table.textContent = "";
   let known = 0;
-  rows.forEach(([t, deep], i) => {
+  const list = rows.map(([t, deep], i) => {
     const has = s.ever.includes(t.id);
     if (has && t !== d.final) known++;
-    const tr = document.createElement("tr");
-    tr.className = (has ? "" : "unk") + (deep ? " deep" : "");
-    const n = document.createElement("td"), x = document.createElement("td");
-    n.textContent = t === d.final ? "∞" : (deep ? "D" : "") + String(i + 1 - (deep ? d.truths.length : 0)).padStart(2, "0");
-    x.textContent = has ? t.text : "█".repeat(Math.max(4, Math.round(t.text.length * 0.8)));
-    tr.append(n, x); table.append(tr);
+    const num = t === d.final ? "--" : (deep ? "D" : "") + String(i + 1 - (deep ? d.truths.length : 0)).padStart(2, "0");
+    return { num, text: has ? t.text : "█".repeat(Math.max(4, Math.min(40, Math.round(t.text.length * 0.8)))), has, deep };
   });
-  $("truthsCount").textContent = `${known} OF ${d.truths.length + d.deep.length} LEARNED` + (s.cycles ? ` · CYCLE ${s.cycles + 1}` : "");
-  $("truthsPage").hidden = false;
+  truthsView = { page: 0, rows: list,
+    count: `${known} OF ${d.truths.length + d.deep.length} LEARNED` + (s.cycles ? ` · CYCLE ${s.cycles + 1}` : "") };
 }
 
 // ============================================================
 // Flight lifecycle (cont.)
 // ============================================================
 function startFlight(now) {
-  flight = { start: now, maxHeat: 0 };
-  lastClip = null; $("saveClip").hidden = true;
+  flight = { start: now, maxHeat: 0, maxAlt: 0 };
+  lastClip = null;
   startRecording();
   flightOrigin = { x: view.x, z: travel, hx: view.hx, hz: view.hz };
   ghostPath = []; lastGhostRec = 0;
@@ -1237,6 +1199,7 @@ function startMelt(now) {
   lie = null; lieTextUntil = 0;       // all text goes silent
   tilt = null; stutterLeft = 0; fallWhispered = false;
   meltVoice();
+  chipCrash();
   // (the hands now rise and cover the camera: see handPose)
 }
 
@@ -1244,6 +1207,7 @@ function startMelt(now) {
 function endFlight(flownMs) {
   mode = "oracle";
   const maxHeat = flight ? flight.maxHeat : 0;
+  lastScore = flight ? flight.maxAlt : 0;
   saveGhost(ghostPath);
   ghostPath = [];
   flight = null; flightOrigin = null;
@@ -1251,7 +1215,8 @@ function endFlight(flownMs) {
   wax = []; feathers = []; embers = []; frags = []; visorDrops = []; sunDrips = []; edgeDrips = [];
   oracle = { start: performance.now(), ...pickTruth(maxHeat), spoken: false, shown: false };
   oracleAudio();
-  $("flew").textContent = `FLOWN ${(flownMs / 1000).toFixed(1)}S · HIGHEST HEAT ${Math.round(maxHeat * 100)}%`;
+  chipSplash();
+  oracle.flew = `FLOWN ${(flownMs / 1000).toFixed(1)}S · HEAT ${Math.round(maxHeat * 100)}% · SCORE ${scoreOf(lastScore)}`;
 }
 
 // ============================================================
@@ -1401,7 +1366,7 @@ function step(now, dt) {
     heat += (near - heat) * (1 - Math.exp(-dt / (near > heat ? HEAT_RISE : HEAT_FALL)));
     if (near >= 1) heat = 1;
     burnAmt = heat * BURN_LIVE;
-    if (flight) flight.maxHeat = Math.max(flight.maxHeat, heat);
+    if (flight) { flight.maxHeat = Math.max(flight.maxHeat, heat); flight.maxAlt = Math.max(flight.maxAlt, altitude); }
 
     if (!flight && altitude > SEA_LINE) { startFlight(now); seaSince = 0; }
 
@@ -1465,128 +1430,332 @@ function sunAimNow() {
   return clamp(1 - off / AIM_CONE, 0, 1);
 }
 
-// ---------- Batched wire drawing ----------
-// Every environment line goes into one of WIRE_LEVELS brightness buckets
-// (far = dim + 1px, near = bright + 2px) and each bucket is stroked once.
+// ============================================================
+// THE PANEL: a 384x224 red LED screen, drawn pixel by pixel
+// ============================================================
+// Everything is drawn into fb (one brightness byte per pixel; painter's order: later covers earlier,
+// and solids are filled black, so near shapes hide the lines behind them). present() then snaps every
+// pixel to the panel's only four colours, #000000 #550000 #aa0000 #ff0000 (ordered dithering for
+// anything in between), adds the LED scan flicker and a faint trace of the last frame, and blows it
+// up with hard pixels. No antialiasing anywhere: every line is 1 panel pixel.
+const PAL32 = new Uint32Array([0xff000000, 0xff000055, 0xff0000aa, 0xff0000ff]);   // RGBA bytes, little-endian
+const BAYER = [0, 8, 2, 10, 12, 4, 14, 6, 3, 11, 1, 9, 15, 7, 13, 5].map(v => (v + 0.5) / 16);
+const fb = new Uint8Array(FB_W * FB_H);
+const prevLv = [new Uint8Array(FB_W * FB_H), new Uint8Array(FB_W * FB_H)];
+const panel = document.createElement("canvas");
+panel.width = FB_W; panel.height = FB_H;
+const pctx = panel.getContext("2d");
+const panelImg = pctx.createImageData(FB_W, FB_H), panel32 = new Uint32Array(panelImg.data.buffer);
+let frameNo = 0, eyeNow = 0, handEye = 0;
+const EYE_SEP = 0.05;                 // 3D: half the distance between the eyes, world units
+// Depth = brightness: far #550000, mid #aa0000, near #ff0000
+const lvOf = b => (b < 0.04 ? 0 : b < 0.36 ? 85 : b < 0.68 ? 170 : 255);
+const clamp01 = v => (v < 0 ? 0 : v > 1 ? 1 : v);
 const wrap = (v, m) => ((v % m) + m) % m;
 const depthB = (z, far) => Math.pow(clamp(1 - z / far, 0, 1), 1.2);   // depth fade
-// Two colour sets: red (the default) and blue (set wireBlue = true while drawing a blue thing)
-let wirePaths = [], dotPaths = [], wireBlue = false;
-function beginWire() {
-  wirePaths = Array.from({ length: WIRE_LEVELS * 2 }, () => new Path2D());
-  dotPaths = Array.from({ length: WIRE_LEVELS * 2 }, () => new Path2D());
-  wireBlue = false;
-}
-// A red dot (for the falling figures), batched by brightness like the lines
-function wireDot(x, y, s, b) {
-  if (b <= 0.02) return;
-  dotPaths[wireLevel(b) + (wireBlue ? WIRE_LEVELS : 0)].rect(x - s / 2, y - s / 2, s, s);
-}
-function wireLevel(b) { return Math.round(clamp(b, 0, 1) * (WIRE_LEVELS - 1)); }
-function wire(x1, y1, x2, y2, b) {
-  if (b <= 0.02) return;
-  const p = wirePaths[wireLevel(b) + (wireBlue ? WIRE_LEVELS : 0)];
-  p.moveTo(x1, y1); p.lineTo(x2, y2);
-}
-function wirePoly(pts, b, closed = false) {
-  if (b <= 0.02 || pts.length < 2) return;
-  const p = wirePaths[wireLevel(b) + (wireBlue ? WIRE_LEVELS : 0)];
-  p.moveTo(pts[0][0], pts[0][1]);
-  for (let i = 1; i < pts.length; i++) p.lineTo(pts[i][0], pts[i][1]);
-  if (closed) p.lineTo(pts[0][0], pts[0][1]);
-}
-function flushWire() {
-  const flick = 0.9 + Math.random() * 0.1;        // slight frame-to-frame flicker
-  for (const [off, col] of [[0, RED], [WIRE_LEVELS, BLUE]]) {
-    ctx.strokeStyle = col; ctx.fillStyle = col;
-    for (let i = 0; i < WIRE_LEVELS; i++) {
-      const t = i / (WIRE_LEVELS - 1);
-      ctx.globalAlpha = (0.12 + 0.88 * t) * flick;
-      ctx.lineWidth = 1 + t;                      // 1px far → 2px near
-      ctx.stroke(wirePaths[off + i]);
-      ctx.fill(dotPaths[off + i]);
+const smooth01 = v => v * v * (3 - 2 * v);
+
+function present(eye, ox) {
+  const prev = prevLv[eye], band = (frameNo * 2) % (FB_H + 80) - 40;   // a slow scan band rolling down
+  const flick = Math.random() < 0.12 ? (Math.random() * FB_H) | 0 : -1; // now and then one row flickers
+  let i = 0;
+  for (let y = 0; y < FB_H; y++) {
+    const dim = y === flick ? 0.6 : y >= band && y < band + 3 ? 0.8 : 1, by = (y & 3) << 2;
+    for (let x = 0; x < FB_W; x++, i++) {
+      let v = fb[i], l = 0;
+      const t = BAYER[by | (x & 3)];
+      if (v) { if (dim !== 1) v *= dim; l = (v / 85 + t) | 0; if (l > 3) l = 3; }
+      const p = prev[i]; prev[i] = l;
+      if (!l && p && t < 0.3) l = 1;                 // persistence: the last frame, faint, in #550000
+      panel32[i] = PAL32[l];
     }
   }
-  ctx.globalAlpha = 1;
-  wireBlue = false;
+  pctx.putImageData(panelImg, 0, 0);
+  const k = canvas.height / FB_H;
+  ctx.imageSmoothingEnabled = false;
+  ctx.drawImage(panel, 0, 0, FB_W, FB_H, ox * k, 0, FB_W * k, FB_H * k);
 }
 
-// Scanlines over the world (not the body): every third row darkened, flickering
-let scanPattern = null;
-function drawScanlines() {
-  if (!scanPattern) {
-    const c = document.createElement("canvas");
-    c.width = 1; c.height = 3;
-    const g = c.getContext("2d");
-    g.fillStyle = "#000"; g.fillRect(0, 2, 1, 1);
-    scanPattern = ctx.createPattern(c, "repeat");
+// ---------- Raster primitives (panel coordinates) ----------
+let LT0 = 0, LT1 = 1;
+function lbEdge(p, q) {
+  if (p === 0) return q >= 0;
+  const r = q / p;
+  if (p < 0) { if (r > LT1) return false; if (r > LT0) LT0 = r; }
+  else { if (r < LT0) return false; if (r < LT1) LT1 = r; }
+  return true;
+}
+// A 1-pixel line (Bresenham), clipped to the panel first (Liang-Barsky)
+function pxLine(x0, y0, x1, y1, v) {
+  if (!(Math.abs(x0) + Math.abs(y0) + Math.abs(x1) + Math.abs(y1) < 1e7)) return;   // NaN / absurd
+  const dx = x1 - x0, dy = y1 - y0;
+  LT0 = 0; LT1 = 1;
+  if (!lbEdge(-dx, x0) || !lbEdge(dx, FB_W - 1 - x0) || !lbEdge(-dy, y0) || !lbEdge(dy, FB_H - 1 - y0)) return;
+  let ax = Math.round(x0 + LT0 * dx), ay = Math.round(y0 + LT0 * dy);
+  const bx = Math.round(x0 + LT1 * dx), by = Math.round(y0 + LT1 * dy);
+  const sx = ax < bx ? 1 : -1, sy = ay < by ? 1 : -1, ddx = Math.abs(bx - ax), ddy = -Math.abs(by - ay);
+  let err = ddx + ddy;
+  for (let n = 0; n < 2000; n++) {
+    if (ax >= 0 && ax < FB_W && ay >= 0 && ay < FB_H) fb[ay * FB_W + ax] = v;
+    if (ax === bx && ay === by) break;
+    const e2 = 2 * err;
+    if (e2 >= ddy) { err += ddy; ax += sx; }
+    if (e2 <= ddx) { err += ddx; ay += sy; }
   }
-  ctx.globalAlpha = 0.35 + Math.random() * 0.15;
-  ctx.fillStyle = scanPattern;
-  ctx.fillRect(0, 0, W, H);
-  ctx.globalAlpha = 1;
+}
+function pxRect(x, y, w, h, v) {
+  let x0 = Math.round(x), y0 = Math.round(y), x1 = x0 + Math.round(w), y1 = y0 + Math.round(h);
+  if (x0 < 0) x0 = 0; if (y0 < 0) y0 = 0; if (x1 > FB_W) x1 = FB_W; if (y1 > FB_H) y1 = FB_H;
+  if (x1 <= x0) return;
+  for (let yy = y0; yy < y1; yy++) fb.fill(v, yy * FB_W + x0, yy * FB_W + x1);
+}
+function pxFrame(x, y, w, h, v) { pxRect(x, y, w, 1, v); pxRect(x, y + h - 1, w, 1, v); pxRect(x, y, 1, h, v); pxRect(x + w - 1, y, 1, h, v); }
+function pxCircle(cx, cy, r, v) {
+  let x = r, y = 0, e = 1 - r;
+  const put = (a, b) => { const px = cx + a, py = cy + b; if (px >= 0 && px < FB_W && py >= 0 && py < FB_H) fb[py * FB_W + px] = v; };
+  while (x >= y) {
+    put(x, y); put(y, x); put(-y, x); put(-x, y); put(-x, -y); put(-y, -x); put(y, -x); put(x, -y);
+    y++;
+    if (e < 0) e += 2 * y + 1; else { x--; e += 2 * (y - x) + 1; }
+  }
+}
+// Scanline polygon fill (even-odd, so concave outlines work), sampled at pixel centres
+const XB = new Float64Array(256);
+function pxFill(p, v) {
+  const n = p.length >> 1;
+  let y0 = Infinity, y1 = -Infinity;
+  for (let i = 1; i < p.length; i += 2) { if (p[i] < y0) y0 = p[i]; if (p[i] > y1) y1 = p[i]; }
+  if (!(y1 >= 0) || !(y0 < FB_H)) return;
+  const ya = Math.max(0, Math.floor(y0)), yb = Math.min(FB_H - 1, Math.floor(y1));
+  for (let y = ya; y <= yb; y++) {
+    const sy = y + 0.5;
+    let k = 0;
+    for (let i = 0, j = n - 1; i < n; j = i++) {
+      const yi = p[2 * i + 1], yj = p[2 * j + 1];
+      if ((yi <= sy) !== (yj <= sy) && k < 256) { const xi = p[2 * i], xj = p[2 * j]; XB[k++] = xi + ((sy - yi) * (xj - xi)) / (yj - yi); }
+    }
+    for (let a = 1; a < k; a++) { const t = XB[a]; let b = a - 1; while (b >= 0 && XB[b] > t) { XB[b + 1] = XB[b]; b--; } XB[b + 1] = t; }
+    const row = y * FB_W;
+    for (let a = 0; a + 1 < k; a += 2) {
+      const xa = Math.max(0, Math.ceil(XB[a] - 0.5)), xb = Math.min(FB_W - 1, Math.floor(XB[a + 1] - 0.5));
+      if (xa <= xb) fb.fill(v, row + xa, row + xb + 1);
+    }
+  }
+}
+function pxOutline(p, v) {
+  const n = p.length;
+  for (let i = 0; i < n; i += 2) { const j = (i + 2) % n; pxLine(p[i], p[i + 1], p[j], p[j + 1], v); }
 }
 
-// ---------- Sun: wireframe sphere, lines warp and jitter with heat ----------
+// ---------- The old wire API, now straight onto the panel (virtual 1280x747 coordinates in) ----------
+function wire(x1, y1, x2, y2, b) { const v = lvOf(b); if (v) pxLine(x1 * FBS, y1 * FBS, x2 * FBS, y2 * FBS, v); }
+function wirePoly(pts, b, closed = false) {
+  const v = lvOf(b);
+  if (!v || pts.length < 2) return;
+  for (let i = 1; i < pts.length; i++) pxLine(pts[i - 1][0] * FBS, pts[i - 1][1] * FBS, pts[i][0] * FBS, pts[i][1] * FBS, v);
+  if (closed) pxLine(pts[pts.length - 1][0] * FBS, pts[pts.length - 1][1] * FBS, pts[0][0] * FBS, pts[0][1] * FBS, v);
+}
+function wireDot(x, y, s, b) {
+  const v = lvOf(b);
+  if (!v) return;
+  const sz = Math.max(1, Math.round(s * FBS));
+  pxRect(x * FBS - sz / 2, y * FBS - sz / 2, sz, sz, v);
+}
+
+// ---------- Solids: black faces with red edges ----------
+// Clip a camera-space polygon to the near plane and project it onto the panel (flat [x, y, ...])
+function projPoly(cam) {
+  const out = [];
+  for (let i = 0; i < cam.length; i++) {
+    const a = cam[i], b = cam[(i + 1) % cam.length], ain = a[2] >= NEAR, bin = b[2] >= NEAR;
+    if (ain) { const s = toScreen(a); out.push(s[0] * FBS, s[1] * FBS); }
+    if (ain !== bin) { const s = toScreen(clipNear(a, b)); out.push(s[0] * FBS, s[1] * FBS); }
+  }
+  return out.length >= 6 ? out : null;
+}
+// One flat face: filled (black by default; fillV < 0 = no fill), edged in edgeV (0 = no edge)
+function face(cam, edgeV, fillV = 0) {
+  const p = projPoly(cam);
+  if (!p) return;
+  if (fillV >= 0) pxFill(p, fillV);
+  if (edgeV) pxOutline(p, edgeV);
+}
+// A convex 8-cornered solid (4 bottom corners in ring order, then the 4 above them). Back faces are
+// culled by comparing each face's direction from the centre with the direction to the eye.
+const HEX_FACES = [[0, 1, 2, 3], [4, 5, 6, 7], [0, 1, 5, 4], [1, 2, 6, 5], [2, 3, 7, 6], [3, 0, 4, 7]];
+function hexa(world, b) {
+  const v = lvOf(b);
+  if (!v) return;
+  const cam = world.map(p => toCam(p[0], p[1], p[2]));
+  let cx = 0, cy = 0, cz = 0, ahead = false;
+  for (const c of cam) { cx += c[0]; cy += c[1]; cz += c[2]; if (c[2] >= NEAR) ahead = true; }
+  if (!ahead) return;
+  cx /= 8; cy /= 8; cz /= 8;
+  for (const f of HEX_FACES) {
+    const q = [cam[f[0]], cam[f[1]], cam[f[2]], cam[f[3]]];
+    const fx = (q[0][0] + q[1][0] + q[2][0] + q[3][0]) / 4, fy = (q[0][1] + q[1][1] + q[2][1] + q[3][1]) / 4, fz = (q[0][2] + q[1][2] + q[2][2] + q[3][2]) / 4;
+    if ((fx - cx) * fx + (fy - cy) * fy + (fz - cz) * fz >= 0) continue;   // facing away
+    face(q, v);
+  }
+}
+// A square beam from p to q, half-width w (poles, legs, crossarms)
+function beam(p, q, w, b) {
+  let dx = q[0] - p[0], dy = q[1] - p[1], dz = q[2] - p[2];
+  const L = Math.hypot(dx, dy, dz) || 1; dx /= L; dy /= L; dz /= L;
+  let sx = -dz, sz = dx, sl = Math.hypot(sx, sz);
+  if (sl < 1e-3) { sx = 1; sz = 0; sl = 1; }
+  sx /= sl; sz /= sl;
+  const ux = dy * sz, uy = dz * sx - dx * sz, uz = -dy * sx;       // up = d x side
+  const ring = e => [[e[0] + (sx + ux) * w, e[1] + uy * w, e[2] + (sz + uz) * w], [e[0] + (-sx + ux) * w, e[1] + uy * w, e[2] + (-sz + uz) * w],
+                     [e[0] + (-sx - ux) * w, e[1] - uy * w, e[2] + (-sz - uz) * w], [e[0] + (sx - ux) * w, e[1] - uy * w, e[2] + (sz - uz) * w]];
+  hexa([...ring(p), ...ring(q)], b);
+}
+
+// ---------- The panel's own type: an original 5x7 pixel font ----------
+const FONT_SRC = {
+  A: ".###.|#...#|#...#|#####|#...#|#...#|#...#", B: "####.|#...#|#...#|####.|#...#|#...#|####.",
+  C: ".####|#....|#....|#....|#....|#....|.####", D: "####.|#...#|#...#|#...#|#...#|#...#|####.",
+  E: "#####|#....|#....|####.|#....|#....|#####", F: "#####|#....|#....|####.|#....|#....|#....",
+  G: ".####|#....|#....|#.###|#...#|#...#|.####", H: "#...#|#...#|#...#|#####|#...#|#...#|#...#",
+  I: ".###.|..#..|..#..|..#..|..#..|..#..|.###.", J: "..###|...#.|...#.|...#.|...#.|#..#.|.##..",
+  K: "#...#|#..#.|#.#..|##...|#.#..|#..#.|#...#", L: "#....|#....|#....|#....|#....|#....|#####",
+  M: "#...#|##.##|#.#.#|#.#.#|#...#|#...#|#...#", N: "#...#|##..#|#.#.#|#..##|#...#|#...#|#...#",
+  O: ".###.|#...#|#...#|#...#|#...#|#...#|.###.", P: "####.|#...#|#...#|####.|#....|#....|#....",
+  Q: ".###.|#...#|#...#|#...#|#.#.#|#..#.|.##.#", R: "####.|#...#|#...#|####.|#.#..|#..#.|#...#",
+  S: ".####|#....|#....|.###.|....#|....#|####.", T: "#####|..#..|..#..|..#..|..#..|..#..|..#..",
+  U: "#...#|#...#|#...#|#...#|#...#|#...#|.###.", V: "#...#|#...#|#...#|#...#|#...#|.#.#.|..#..",
+  W: "#...#|#...#|#...#|#.#.#|#.#.#|##.##|#...#", X: "#...#|#...#|.#.#.|..#..|.#.#.|#...#|#...#",
+  Y: "#...#|#...#|.#.#.|..#..|..#..|..#..|..#..", Z: "#####|....#|...#.|..#..|.#...|#....|#####",
+  0: ".###.|#...#|#..##|#.#.#|##..#|#...#|.###.", 1: "..#..|.##..|..#..|..#..|..#..|..#..|.###.",
+  2: ".###.|#...#|....#|...#.|..#..|.#...|#####", 3: "####.|....#|....#|.###.|....#|....#|####.",
+  4: "...#.|..##.|.#.#.|#..#.|#####|...#.|...#.", 5: "#####|#....|####.|....#|....#|#...#|.###.",
+  6: ".###.|#....|#....|####.|#...#|#...#|.###.", 7: "#####|....#|...#.|..#..|.#...|.#...|.#...",
+  8: ".###.|#...#|#...#|.###.|#...#|#...#|.###.", 9: ".###.|#...#|#...#|.####|....#|....#|.###.",
+  " ": ".....|.....|.....|.....|.....|.....|.....", ".": ".....|.....|.....|.....|.....|.##..|.##..",
+  ",": ".....|.....|.....|.....|.##..|..#..|.#...", "!": "..#..|..#..|..#..|..#..|..#..|.....|..#..",
+  "?": ".###.|#...#|....#|...#.|..#..|.....|..#..", "'": "..#..|..#..|.#...|.....|.....|.....|.....",
+  '"': ".#.#.|.#.#.|.....|.....|.....|.....|.....", "-": ".....|.....|.....|.###.|.....|.....|.....",
+  "_": ".....|.....|.....|.....|.....|.....|#####", ":": ".....|.##..|.##..|.....|.##..|.##..|.....",
+  ";": ".....|.##..|.##..|.....|.##..|..#..|.#...", "/": "....#|....#|...#.|..#..|.#...|#....|#....",
+  "\\": "#....|#....|.#...|..#..|...#.|....#|....#", "(": "...#.|..#..|.#...|.#...|.#...|..#..|...#.",
+  ")": ".#...|..#..|...#.|...#.|...#.|..#..|.#...", "[": ".###.|.#...|.#...|.#...|.#...|.#...|.###.",
+  "]": ".###.|...#.|...#.|...#.|...#.|...#.|.###.", "#": ".#.#.|.#.#.|#####|.#.#.|#####|.#.#.|.#.#.",
+  "$": "..#..|.####|#.#..|.###.|..#.#|####.|..#..", "%": "##..#|##..#|...#.|..#..|.#...|#..##|#..##",
+  "&": ".##..|#..#.|#.#..|.#...|#.#.#|#..#.|.##.#", "*": ".....|..#..|#.#.#|.###.|#.#.#|..#..|.....",
+  "+": ".....|..#..|..#..|#####|..#..|..#..|.....", "=": ".....|.....|#####|.....|#####|.....|.....",
+  "<": "...#.|..#..|.#...|#....|.#...|..#..|...#.", ">": ".#...|..#..|...#.|....#|...#.|..#..|.#...",
+  "|": "..#..|..#..|..#..|..#..|..#..|..#..|..#..", "@": ".###.|#...#|#.###|#.#.#|#.###|#....|.####",
+  "®": ".###.|#...#|##.##|#.#.#|##.##|#...#|.###.", "™": "###.#|.#.##|.#.#.|.....|.....|.....|.....",
+  "—": ".....|.....|.....|#####|.....|.....|.....", "·": ".....|.....|.....|..#..|.....|.....|.....",
+  "¤": ".....|#...#|.###.|.#.#.|.###.|#...#|.....", "█": "#####|#####|#####|#####|#####|#####|#####",
+  "←": ".....|..#..|.#...|#####|.#...|..#..|.....",
+  "Γ": "#####|#....|#....|#....|#....|#....|#....", "Δ": "..#..|..#..|.#.#.|.#.#.|#...#|#...#|#####",
+  "Θ": ".###.|#...#|#...#|#####|#...#|#...#|.###.", "Λ": "..#..|..#..|.#.#.|.#.#.|#...#|#...#|#...#",
+  "Ξ": "#####|.....|.....|.###.|.....|.....|#####", "Π": "#####|.#.#.|.#.#.|.#.#.|.#.#.|.#.#.|.#.#.",
+  "Σ": "#####|#....|.#...|..#..|.#...|#....|#####", "Φ": "..#..|.###.|#.#.#|#.#.#|#.#.#|.###.|..#..",
+  "Ψ": "#.#.#|#.#.#|#.#.#|.###.|..#..|..#..|..#..", "Ω": ".###.|#...#|#...#|#...#|.#.#.|.#.#.|##.##",
+  "α": ".....|.....|.##.#|#..#.|#..#.|#..#.|.##.#", "β": ".##..|#..#.|###..|#..#.|#..#.|###..|#....",
+  "δ": ".##..|#....|.#...|.##..|#..#.|#..#.|.##..", "λ": "#....|.#...|.#...|..#..|.#.#.|#...#|#...#",
+  "μ": ".....|#..#.|#..#.|#..#.|#..#.|###.#|#....", "π": ".....|#####|.#.#.|.#.#.|.#.#.|.#.#.|.#..#",
+};
+const FONT = {};
+for (const k in FONT_SRC) FONT[k] = FONT_SRC[k].split("|").map(r => parseInt(r.replace(/#/g, "1").replace(/\./g, "0"), 2));
+const glyph = ch => FONT[ch] || FONT[ch.toUpperCase()] || FONT["?"];
+function textW(s, sc = 1) { const n = [...String(s)].length; return n ? (n * 6 - 1) * sc : 0; }
+// Text on the panel: x, y in panel pixels, sc = whole-pixel scale; outline = a black border to stand off the scene
+function pxText(str, x, y, sc = 1, v = 255, align = "left", outline = false) {
+  const chars = [...String(str)], w = textW(str, sc);
+  const x0 = Math.round(align === "center" ? x - w / 2 : align === "right" ? x - w : x), y0 = Math.round(y);
+  for (const pass of outline ? [0, 1] : [1]) {
+    for (let k = 0; k < chars.length; k++) {
+      if (chars[k] === " ") continue;
+      const g = glyph(chars[k]), gx = x0 + k * 6 * sc;
+      for (let r = 0; r < 7; r++) {
+        const bits = g[r];
+        if (!bits) continue;
+        for (let c = 0; c < 5; c++) if (bits & (16 >> c)) {
+          if (pass === 0) pxRect(gx + (c - 1) * sc, y0 + (r - 1) * sc, 3 * sc, 3 * sc, 0);
+          else pxRect(gx + c * sc, y0 + r * sc, sc, sc, v);
+        }
+      }
+    }
+  }
+}
+function wrapChars(txt, per) {
+  const out = [];
+  let cur = "";
+  for (const w of txt.split(" ")) {
+    const t = cur ? cur + " " + w : w;
+    if (cur && t.length > per) { out.push(cur); cur = w; } else cur = t;
+  }
+  if (cur) out.push(cur);
+  return out;
+}
+
+// ---------- Low-poly shapes ----------
+const ICO_V = (() => {
+  const t = (1 + Math.sqrt(5)) / 2;
+  return [[-1, t, 0], [1, t, 0], [-1, -t, 0], [1, -t, 0], [0, -1, t], [0, 1, t], [0, -1, -t], [0, 1, -t], [t, 0, -1], [t, 0, 1], [-t, 0, -1], [-t, 0, 1]]
+    .map(a => { const l = Math.hypot(...a); return a.map(c => c / l); });
+})();
+const ICO_F = [[0, 11, 5], [0, 5, 1], [0, 1, 7], [0, 7, 10], [0, 10, 11], [1, 5, 9], [5, 11, 4], [11, 10, 2], [10, 7, 6], [7, 1, 8],
+               [3, 9, 4], [3, 4, 2], [3, 2, 6], [3, 6, 8], [3, 8, 9], [4, 9, 5], [2, 4, 11], [6, 2, 10], [8, 6, 7], [9, 8, 1]];
+// The sun: a geodesic sphere, the icosahedron split once (42 corners, 80 faces)
+const GEO = (() => {
+  const v = ICO_V.map(p => p.slice()), f = [], cache = new Map();
+  const mid = (a, b) => {
+    const k = a < b ? a * 100 + b : b * 100 + a;
+    if (cache.has(k)) return cache.get(k);
+    const p = v[a].map((c, i) => (c + v[b][i]) / 2), l = Math.hypot(...p);
+    v.push(p.map(c => c / l)); cache.set(k, v.length - 1);
+    return v.length - 1;
+  };
+  for (const [a, b, c] of ICO_F) { const ab = mid(a, b), bc = mid(b, c), ca = mid(c, a); f.push([a, ab, ca], [b, bc, ab], [c, ca, bc], [ab, bc, ca]); }
+  return { v, f };
+})();
+
+// ---------- Sun: a solid low-poly sphere; it warps and jitters with heat, and melts ----------
 function drawSun(now, s) {
   if (s.r < 2) return;
-  const f = s.flare, R = s.r, tilt = 0.4, ct = Math.cos(tilt), st = Math.sin(tilt);
-  const spin = now / 5000, tw = now / 110;
-  const base = 0.55 + 0.45 * f;
-  const mf = s.melt || 0, mt = now / 1000;
-  const P = (lat, lon) => {
-    const cl = Math.cos(lat), x = cl * Math.sin(lon), y = Math.sin(lat), z = cl * Math.cos(lon);
-    const y2 = y * ct - z * st, z2 = y * st + z * ct;          // axis tilted toward the camera
-    const w = 1 + f * (0.08 * Math.sin(lat * 6 + lon * 4 + tw) + 0.04 * Math.sin(lon * 9 - tw * 1.7))
-                + f * f * (Math.random() - 0.5) * 0.05;          // warp + jitter
-    // Melting: it bulges at the waist and the lower half sags like wax, in slow uneven runs
+  const f = s.flare, R = s.r, mf = s.melt || 0, mt = now / 1000, tw = now / 110, spin = now / 5000;
+  const ct = Math.cos(0.4), st = Math.sin(0.4), cs = Math.cos(spin), ss = Math.sin(spin);
+  const P = GEO.v.map(([x0, y, z0]) => {
+    const x = x0 * cs + z0 * ss, z = -x0 * ss + z0 * cs;           // turning
+    const y2 = y * ct - z * st, z2 = y * st + z * ct;              // axis tilted toward you
+    const w = 1 + f * (0.07 * Math.sin(y * 6 + x0 * 4 + tw) + 0.04 * Math.sin(z0 * 9 - tw * 1.7)) + f * f * (Math.random() - 0.5) * 0.05;
     let xx = x * w, yy = y2 * w;
-    if (mf > 0) {
+    if (mf > 0) {                                                  // melting: bulges, the lower half sags like wax
       xx *= 1 + mf * 0.18 * (1 - Math.abs(yy));
       const low = Math.max(0, -yy);
-      yy -= mf * 0.55 * low * low * (1 + 0.35 * Math.sin(lon * 5 + mt * 0.8));
+      yy -= mf * 0.55 * low * low * (1 + 0.35 * Math.sin(x0 * 5 + mt * 0.8));
     }
-    return [s.x + xx * R, s.y - yy * R, z2];
-  };
-  const seg = (a, b) => wire(a[0], a[1], b[0], b[1], a[2] + b[2] > 0 ? base : base * 0.22);  // back half dim
-  for (let la = -60; la <= 60; la += 20) {                       // latitudes
-    const lat = la * Math.PI / 180;
-    let prev = P(lat, spin);
-    for (let i = 1; i <= 32; i++) { const q = P(lat, spin + (i / 32) * Math.PI * 2); seg(prev, q); prev = q; }
+    return [(s.x + xx * R) * FBS, (s.y - yy * R) * FBS, z2];
+  });
+  const v = s.dim ? 85 : R > 150 ? 255 : 170;
+  const fr = [];
+  for (const t of GEO.f) { const z = P[t[0]][2] + P[t[1]][2] + P[t[2]][2]; if (z > -0.3) fr.push([z, t]); }
+  fr.sort((a, b) => a[0] - b[0]);
+  for (const [, t] of fr) {
+    const p = [P[t[0]][0], P[t[0]][1], P[t[1]][0], P[t[1]][1], P[t[2]][0], P[t[2]][1]];
+    pxFill(p, 0); pxOutline(p, v);
   }
-  for (let k = 0; k < 12; k++) {                                 // longitudes
-    const lon = spin + (k / 12) * Math.PI * 2;
-    let prev = P(-Math.PI / 2, lon);
-    for (let i = 1; i <= 16; i++) { const q = P(-Math.PI / 2 + (i / 16) * Math.PI, lon); seg(prev, q); prev = q; }
-  }
-  const limb = [];                                               // outline
-  for (let i = 0; i <= 40; i++) {
-    const a = (i / 40) * Math.PI * 2;
-    const w = 1 + f * 0.05 * Math.sin(a * 7 + tw) + f * f * (Math.random() - 0.5) * 0.03;
-    const sag = mf * 0.55 * Math.pow(Math.max(0, Math.sin(a) + 0.25), 2) * (1 + 0.4 * Math.sin(a * 9 + mt));   // the rim runs
-    limb.push([s.x + Math.cos(a) * R * w * (1 + mf * 0.12), s.y + Math.sin(a) * R * w + sag * R]);
-  }
-  wirePoly(limb, Math.min(1, base + 0.15));
-  drawCorona(s, now);
+  if (!s.dim) drawCorona(s, now);
   if (s.face > 0.02) drawSunFace(s, now);
 }
 
-// The corona: flame tongues off the limb, short and lazy from afar, long and roaring up close
+// The corona: a few flame tongues off the limb, short and lazy from afar, long and roaring up close
 function drawCorona(s, now) {
   const f = s.flare, R = s.r, t = now / 1000;
-  const n = Math.round(lerp(14, CORONA_N, f));
-  const b = 0.3 + 0.7 * f;
+  const n = Math.round(lerp(8, 20, f)), b = 0.3 + 0.7 * f;
   for (let i = 0; i < n; i++) {
     const a0 = (i / n) * Math.PI * 2 + t * 0.15 * (1 + 2 * f);
-    // each tongue flickers in length and leans with the spin
-    const len = R * (0.06 + 0.5 * f * (0.5 + 0.5 * Math.sin(t * (6 + 9 * f) + i * 1.7)) + 0.04 * Math.random() * f);
+    const len = R * (0.08 + 0.5 * f * (0.5 + 0.5 * Math.sin(t * (6 + 9 * f) + i * 1.7)) + 0.04 * Math.random() * f);
     const lean = 0.25 * Math.sin(t * 3 + i) * f;
-    const x0 = s.x + Math.cos(a0) * R * 1.01, y0 = s.y + Math.sin(a0) * R * 1.01;
+    const x0 = s.x + Math.cos(a0) * R * 1.02, y0 = s.y + Math.sin(a0) * R * 1.02;
     const x1 = s.x + Math.cos(a0 + lean * 0.5) * (R + len * 0.55), y1 = s.y + Math.sin(a0 + lean * 0.5) * (R + len * 0.55);
     const x2 = s.x + Math.cos(a0 + lean) * (R + len), y2 = s.y + Math.sin(a0 + lean) * (R + len);
-    wire(x0, y0, x1, y1, b); wire(x1, y1, x2, y2, b * 0.7);
-    if (f > 0.5 && Math.random() < (f - 0.5) * 0.5)              // sparks thrown off the tips
-      wireDot(x2 + (Math.random() - 0.5) * 20, y2 + (Math.random() - 0.5) * 20, 2 + Math.random() * 2, b);
+    wire(x0, y0, x1, y1, b); wire(x1, y1, x2, y2, b * 0.6);
+    if (f > 0.5 && Math.random() < (f - 0.5) * 0.5) wireDot(x2 + (Math.random() - 0.5) * 20, y2 + (Math.random() - 0.5) * 20, 4, b);
   }
 }
 
@@ -1596,33 +1765,26 @@ function drawSunFace(s, now) {
   const R = s.r, a = s.face, f = s.flare, scatter = (1 - a) * R * 0.45, tw = now / 110;
   const J = () => (Math.random() - 0.5) * (scatter + f * f * R * 0.025);
   const P = (u, v) => [s.x + u * R + J(), s.y + v * R + J()];
-  const b = 0.25 + 0.75 * a;
+  const b = 0.4 + 0.6 * a;
   for (const sd of [-1, 1]) {
     const ex = sd * 0.32, eye = [];
-    const h = 0.05 + 0.02 * Math.sin(tw * 0.3) - 0.03 * f;         // narrowing
-    for (let i = 0; i <= 10; i++) {
-      const t = (i / 10) * Math.PI * 2;
-      eye.push(P(ex + Math.cos(t) * 0.13, -0.18 + Math.sin(t) * Math.max(0.012, h)));
-    }
+    const h = 0.05 + 0.02 * Math.sin(tw * 0.3) - 0.03 * f;
+    for (let i = 0; i <= 8; i++) { const t = (i / 8) * Math.PI * 2; eye.push(P(ex + Math.cos(t) * 0.13, -0.18 + Math.sin(t) * Math.max(0.012, h))); }
     wirePoly(eye, b);
-    if (f > 0.15) {                                                // brows, angled down toward the nose
-      const k = (f - 0.15) / 0.85;
-      wirePoly([P(ex - sd * 0.18, -0.34 + 0.02 * k), P(ex + sd * 0.1, -0.32 + 0.1 * k)], b * k);
-    }
-    if (f > 0.6) wireDot(s.x + ex * R, s.y - 0.18 * R, 3 + 3 * f, b);   // a pupil, fixed on you
+    if (f > 0.15) { const k = (f - 0.15) / 0.85; wirePoly([P(ex - sd * 0.18, -0.34 + 0.02 * k), P(ex + sd * 0.1, -0.32 + 0.1 * k)], b * k); }
+    if (f > 0.6) wireDot(s.x + ex * R, s.y - 0.18 * R, 6 + 6 * f, b);
   }
-  wirePoly([P(0, -0.1), P(0.05, 0.12), P(-0.03, 0.15)], b * 0.8);  // nose
-  const open = 0.22 * f * (0.7 + 0.3 * Math.sin(tw * 0.5));         // the mouth opens with heat
-  const top = [], bot = [];
-  for (let i = 0; i <= 12; i++) {
-    const u = -0.3 + (i / 12) * 0.6, e = 1 - (u / 0.3) ** 2;
+  wirePoly([P(0, -0.1), P(0.05, 0.12), P(-0.03, 0.15)], b * 0.8);
+  const open = 0.22 * f * (0.7 + 0.3 * Math.sin(tw * 0.5)), top = [], bot = [];
+  for (let i = 0; i <= 8; i++) {
+    const u = -0.3 + (i / 8) * 0.6, e = 1 - (u / 0.3) ** 2;
     top.push(P(u, 0.42 - 0.06 * e - open * 0.25 * e));
     bot.push(P(u, 0.42 - 0.06 * e + open * e));
   }
   wirePoly(top, b);
   if (open > 0.01) {
     wirePoly(bot, b);
-    for (let i = 1; i < 12; i += 2) wire(top[i][0], top[i][1], top[i][0], top[i][1] + open * R * 0.4 * (1 - ((i / 12 - 0.5) * 2) ** 2), b * 0.6);   // teeth
+    for (let i = 1; i < 8; i += 2) wire(top[i][0], top[i][1], top[i][0], top[i][1] + open * R * 0.4 * (1 - ((i / 8 - 0.5) * 2) ** 2), b * 0.6);
   }
 }
 
@@ -1635,13 +1797,22 @@ function updateLie(now, dt) {
     lie = { start: now, end: now + dur, kind: Math.random() < 0.5 ? "double" : "drift",
             dx: (Math.random() < 0.5 ? -1 : 1) * (0.5 + Math.random() * 0.5), dy: (Math.random() - 0.5) * 0.6 };
     lieTextUntil = now + dur + 900;
-    whisper();                                        // each line of text gets a whispered syllable
+    whisper();
+  }
+}
+function drawSunWithLies(now, sun) {
+  if (!lie || sun.r < 2) { drawSun(now, sun); return; }
+  const u = clamp((now - lie.start) / (lie.end - lie.start), 0, 1), env = Math.sin(u * Math.PI);
+  if (lie.kind === "double") {
+    drawSun(now, { ...sun, x: sun.x + lie.dx * sun.r * 1.4 * env, y: sun.y + lie.dy * sun.r * env, face: 0 });
+    drawSun(now, sun);
+  } else {
+    drawSun(now, { ...sun, x: sun.x + lie.dx * sun.r * 1.2 * env, y: sun.y + lie.dy * sun.r * env });
   }
 }
 
 // ---------- The renderer fails at high heat ----------
 function glitchAmt() { return mode === "live" ? clamp((heat - GLITCH_FROM) / (1 - GLITCH_FROM), 0, 1) : 0; }
-
 function updateGlitch(now, dt) {
   const g = glitchAmt();
   if (tilt && now > tilt.end) tilt = null;
@@ -1654,14 +1825,18 @@ function tiltNow(now) {
   if (!tilt) return 0;
   return tilt.amt * Math.sin(clamp((now - tilt.start) / (tilt.end - tilt.start), 0, 1) * Math.PI);
 }
-// Tear: shift a few horizontal bands of the frame sideways
+// Tear: a few bands of panel rows slip sideways
 function tearFrame() {
   const g = glitchAmt();
   if (g <= 0 || Math.random() > g * 0.25) return;
   const n = 1 + ((Math.random() * 3 * g) | 0);
   for (let i = 0; i < n; i++) {
-    const y = Math.random() * H, h = 4 + Math.random() * 50 * g, dx = (Math.random() - 0.5) * 160 * g;
-    ctx.drawImage(canvas, 0, y, W, h, dx, y, W, h);
+    const y = (Math.random() * FB_H) | 0, h = 1 + ((Math.random() * 15 * g) | 0), dx = Math.round((Math.random() - 0.5) * 48 * g);
+    for (let r = y; r < Math.min(FB_H, y + h); r++) {
+      const row = r * FB_W;
+      if (dx > 0) fb.copyWithin(row + dx, row, row + FB_W - dx);
+      else if (dx < 0) fb.copyWithin(row, row - dx, row + FB_W);
+    }
   }
 }
 // Text flickers into Greek letters
@@ -1671,21 +1846,17 @@ function glitchText(s) {
   return [...s].map(c => (c !== " " && Math.random() < g * 0.3 ? GREEK[(Math.random() * GREEK.length) | 0] : c)).join("");
 }
 
-// ---------- Wax on the visor: drops land, stick, slip down; the view behind them blurs red ----------
+// ---------- Wax on the visor: drops land, stick, slip down; behind them the view goes dim and grainy ----------
 function updateVisor(dt) {
-  if (mode === "live" && heat > VISOR_FROM && visorDrops.length < VISOR_CAP &&
-      Math.random() < heat * heat * VISOR_RATE * dt) {
-    visorDrops.push({
-      x: Math.random() * W, y: Math.random() * H * 0.85,
-      r: (8 + Math.random() * 18) * (0.6 + heat * 0.6), vy: 0, stick: 0.3 + Math.random() * 1.5, trail: [],
-    });
+  if (mode === "live" && heat > VISOR_FROM && visorDrops.length < VISOR_CAP && Math.random() < heat * heat * VISOR_RATE * dt) {
+    visorDrops.push({ x: Math.random() * W, y: Math.random() * H * 0.85, r: (8 + Math.random() * 18) * (0.6 + heat * 0.6), vy: 0, stick: 0.3 + Math.random() * 1.5, trail: [] });
   }
   for (const d of visorDrops) {
-    if (mode === "melt") d.vy += 2500 * dt;           // the fall clears them
+    if (mode === "melt") d.vy += 2500 * dt;
     else {
       d.stick -= dt;
-      if (d.stick <= 0) { d.vy = 20 + Math.random() * 70 * (d.r / 20); d.stick = 0.3 + Math.random() * 1.2; }   // slip
-      else d.vy *= 1 - 3 * dt;                                                                                 // stick
+      if (d.stick <= 0) { d.vy = 20 + Math.random() * 70 * (d.r / 20); d.stick = 0.3 + Math.random() * 1.2; }
+      else d.vy *= 1 - 3 * dt;
     }
     d.y += d.vy * dt;
     const last = d.trail[d.trail.length - 1];
@@ -1693,57 +1864,33 @@ function updateVisor(dt) {
   }
   visorDrops = visorDrops.filter(d => d.y - d.r < H + 40);
 }
-
+function pxWax(cx, cy, rx, ry) {
+  for (let y = Math.max(0, Math.ceil(cy - ry)); y <= Math.min(FB_H - 1, Math.floor(cy + ry)); y++) {
+    const dy = (y - cy) / ry, hw = rx * Math.sqrt(Math.max(0, 1 - dy * dy)), row = y * FB_W;
+    for (let x = Math.max(0, Math.ceil(cx - hw)); x <= Math.min(FB_W - 1, Math.floor(cx + hw)); x++) fb[row + x] = fb[row + x] ? 85 : 22;
+  }
+}
 function drawVisor() {
-  if (!visorDrops.length) return;
-  // Blur = a scaled-down copy of the frame, drawn back up inside the drops (cheap on phones)
-  const f = Math.round(lerp(6, 14, heat)), bw = Math.ceil(W / f), bh = Math.ceil(H / f);
-  if (!blurCanvas) { blurCanvas = document.createElement("canvas"); blurCtx = blurCanvas.getContext("2d"); }
-  if (blurCanvas.width !== bw || blurCanvas.height !== bh) { blurCanvas.width = bw; blurCanvas.height = bh; }
-  blurCtx.imageSmoothingEnabled = true; blurCtx.imageSmoothingQuality = "high";
-  blurCtx.drawImage(canvas, 0, 0, bw, bh);
-
-  const clip = new Path2D();
   for (const d of visorDrops) {
-    clip.moveTo(d.x + d.r, d.y); clip.ellipse(d.x, d.y, d.r, d.r * 1.15, 0, 0, Math.PI * 2);
-    d.trail.forEach(([tx, ty], i) => {
-      const tr = d.r * 0.25 * (i + 1) / d.trail.length;
-      clip.moveTo(tx + tr, ty); clip.ellipse(tx, ty, tr, tr * 1.3, 0, 0, Math.PI * 2);
-    });
+    const cx = d.x * FBS, cy = d.y * FBS, r = d.r * FBS;
+    pxWax(cx, cy, r, r * 1.15);
+    d.trail.forEach(([tx, ty], i) => { const tr = (d.r * 0.25 * (i + 1) / d.trail.length) * FBS; pxWax(tx * FBS, ty * FBS, tr, tr * 1.3); });
+    for (let a = Math.PI * 1.15; a < Math.PI * 1.85; a += 0.2) pxRect(cx + Math.cos(a) * r, cy + Math.sin(a) * r * 1.15, 1, 1, 170);   // the rim
   }
-  ctx.save();
-  ctx.clip(clip);
-  ctx.imageSmoothingEnabled = true;
-  ctx.drawImage(blurCanvas, 0, 0, bw, bh, -6, 10, W + 12, H + 12);   // slight lens shift / magnify
-  ctx.fillStyle = `rgba(255, 70, 20, ${0.18 + 0.25 * heat})`;          // red-orange tint
-  ctx.fillRect(0, 0, W, H);
-  ctx.restore();
-  // A thin bright rim on the upper edge of each drop
-  ctx.strokeStyle = "rgba(255, 150, 90, 0.45)"; ctx.lineWidth = 1.2;
-  ctx.beginPath();
-  for (const d of visorDrops) {
-    const a0 = Math.PI * 1.15;
-    ctx.moveTo(d.x + Math.cos(a0) * d.r, d.y + Math.sin(a0) * d.r * 1.15);
-    ctx.ellipse(d.x, d.y, d.r, d.r * 1.15, 0, a0, Math.PI * 1.85);
-  }
-  ctx.stroke();
 }
 
 // ---------- Greek rain: falling columns behind the world ----------
 // Sparse and slow at sea; denser and faster with altitude and heat; near the sun the
-// letters glitch into Latin and symbols. Each column has a depth: size + brightness.
-const RAIN_SIZES = [11, 15, 21];
+// letters glitch into Latin and symbols. Three depths: dimmer = further.
+const RAIN_SIZES = [27, 27, 27];
 function rainDensity() { return mode === "melt" ? 0.6 : clamp(altitude * 0.6 + heat * 0.6, 0, 1); }
 function sunGlitch() { return heat * (0.4 + 0.6 * sunAim) * 0.7; }
-function rainChar() {
-  return Math.random() < sunGlitch() ? LATIN[(Math.random() * LATIN.length) | 0] : GREEK[(Math.random() * GREEK.length) | 0];
-}
+function rainChar() { return Math.random() < sunGlitch() ? LATIN[(Math.random() * LATIN.length) | 0] : GREEK[(Math.random() * GREEK.length) | 0]; }
 function newColumn(anywhere) {
-  const d = (Math.random() * 3) | 0, size = RAIN_SIZES[d];
-  const len = 6 + ((Math.random() * 12) | 0);
+  const d = (Math.random() * 3) | 0, size = RAIN_SIZES[d], len = 6 + ((Math.random() * 12) | 0);
   return {
-    x: Math.round((Math.random() * W) / 18) * 18 + 9, y: anywhere ? Math.random() * H : -Math.random() * 300,
-    d, size, alpha: [0.06, 0.11, 0.18][d], v: [45, 75, 115][d] * (0.8 + Math.random() * 0.4),
+    x: Math.round((Math.random() * W) / 27) * 27 + 13, y: anywhere ? Math.random() * H : -Math.random() * 300,
+    d, size, v: [45, 75, 115][d] * (0.8 + Math.random() * 0.4),
     chars: Array.from({ length: len }, rainChar), t: 0, swap: 0.1 + Math.random() * 0.3,
   };
 }
@@ -1754,12 +1901,8 @@ function updateRain(dt) {
   for (const c of rain) {
     c.y += c.v * speed * dt;
     c.t += dt;
-    if (c.t > c.swap) {                                   // characters keep changing
-      c.t = 0; c.swap = (0.05 + Math.random() * 0.3) / (1 + dens * 2);
-      c.chars[(Math.random() * c.chars.length) | 0] = rainChar();
-    }
+    if (c.t > c.swap) { c.t = 0; c.swap = (0.05 + Math.random() * 0.3) / (1 + dens * 2); c.chars[(Math.random() * c.chars.length) | 0] = rainChar(); }
   }
-  // Columns that leave the bottom start again at the top, or retire if there are too many
   rain = rain.filter(c => {
     if (c.y - c.chars.length * c.size < H) return true;
     if (rain.length > want) return false;
@@ -1768,30 +1911,23 @@ function updateRain(dt) {
   });
 }
 function drawRain() {
-  ctx.save();
-  ctx.fillStyle = RED;
-  ctx.textAlign = "center"; ctx.textBaseline = "middle";
   const g = sunGlitch();
-  for (let d = 0; d < RAIN_SIZES.length; d++) {          // one font per depth layer
-    ctx.font = `${RAIN_SIZES[d]}px system-ui, sans-serif`;
-    for (const c of rain) {
-      if (c.d !== d) continue;
-      for (let i = 0; i < c.chars.length; i++) {
-        const y = c.y - i * c.size;
-        if (y < -c.size || y > H + c.size) continue;
-        ctx.globalAlpha = c.alpha * (i === 0 ? 2.2 : 1 - i / c.chars.length);   // bright head, fading tail
-        const ch = g > 0 && Math.random() < g * 0.15 ? LATIN[(Math.random() * LATIN.length) | 0] : c.chars[i];
-        ctx.fillText(ch, c.x, y);
-      }
+  for (const c of rain) {
+    const x = Math.round(c.x * FBS) - 2, base = [26, 42, 70][c.d];
+    for (let i = 0; i < c.chars.length; i++) {
+      const y = (c.y - i * c.size) * FBS;
+      if (y < -8 || y > FB_H) continue;
+      const v = i === 0 ? base * 2.2 : base * (1 - i / c.chars.length);
+      const ch = g > 0 && Math.random() < g * 0.15 ? LATIN[(Math.random() * LATIN.length) | 0] : c.chars[i];
+      pxText(ch, x, y, 1, v | 0);
     }
   }
-  ctx.restore();
 }
 
-// ---------- The body: two wireframe hands at the lower corners ----------
-// Built in hand-local space (right hand; y along the fingers, x across with the thumb at −x,
-// z forward), then posed and projected. Every line is either FLESH (red outline) or BONE
-// (white-red centre line). Flesh burns off from the fingertips as heat rises.
+// ---------- The body: two hands at the lower corners, solid, burning to the bone ----------
+// Built in hand-local space (right hand; y along the fingers, x across with the thumb at -x,
+// z forward), then posed and projected. Flesh is black polygons with red edges (so the hands block
+// the world); as heat rises it burns off from the fingertips and the bones show.
 const FINGERS = [   // knuckle position, splay, segment lengths, half-width
   { x: -0.17,  y: 0.56, splay: -0.10, len: [0.25, 0.15, 0.11],  w: 0.045 },   // index
   { x: -0.055, y: 0.58, splay: -0.02, len: [0.28, 0.17, 0.12],  w: 0.047 },   // middle
@@ -1799,63 +1935,57 @@ const FINGERS = [   // knuckle position, splay, segment lengths, half-width
   { x: 0.165,  y: 0.51, splay: 0.15,  len: [0.20, 0.125, 0.10], w: 0.038 },   // pinky
 ];
 const THUMB = { x: -0.19, y: 0.14, splay: -0.75, len: [0.20, 0.15, 0.12], w: 0.05 };
-const smooth01 = v => v * v * (3 - 2 * v);
 
-// Where each hand is and how it's held this frame. side: −1 left, +1 right.
+// Where each hand is and how it's held this frame. side: -1 left, +1 right.
 function handPose(now, side) {
   const t = now / 1000;
   const sp = clamp((fwdSpeed - SPEED_BASE) / (SPEED_ALT + SPEED_BASE), 0, 1);
   let cover = 0, drop = 0;
-  if (mode === "melt") {                                // CRASH: up over the camera, then away
+  if (mode === "melt") {
     const ft = (now - meltStart) / 1000;
     drop = clamp((ft - COVER_OUT_AT) / COVER_OUT, 0, 1);
     cover = smooth01(clamp(ft / COVER_IN, 0, 1));
   }
   const trem = heat * heat * 0.008 + (mode === "melt" ? 0.004 : 0);
   const base = [side * HAND_BASE[0], HAND_BASE[1], HAND_BASE[2]];
-  base[1] += 0.012 * Math.sin(t * 1.3 + side * 0.4);                         // breathing
-  base[1] += 0.06 * clamp((altitude - SEA_LINE) / (1 - SEA_LINE), 0, 1);      // reaching higher as you climb
-  base[2] -= 0.05 * heat;                                                     // drawn toward the sun
-  base[0] += Math.sin(t * 0.8 + side * 2) * 0.01 * (1 + 2 * sp) + side * 0.03 * sp;   // drift with speed
+  base[1] += 0.012 * Math.sin(t * 1.3 + side * 0.4);
+  base[1] += 0.06 * clamp((altitude - SEA_LINE) / (1 - SEA_LINE), 0, 1);
+  base[2] -= 0.05 * heat;
+  base[0] += Math.sin(t * 0.8 + side * 2) * 0.01 * (1 + 2 * sp) + side * 0.03 * sp;
   base[1] += Math.sin(t * 1.1 + side) * 0.008 * (1 + 2 * sp) - 0.04 * sp + (Math.random() - 0.5) * 0.004 * sp;
-  base[1] += -side * bank * 0.22;                     // bank left (bank > 0) raises the left hand
-  base[0] += (Math.random() - 0.5) * trem; base[1] += (Math.random() - 0.5) * trem;   // trembling with heat
+  base[1] += -side * bank * 0.22;
+  base[0] += (Math.random() - 0.5) * trem; base[1] += (Math.random() - 0.5) * trem;
   const cb = [side * 0.16, -0.02, 0.45];
   const b = base.map((v, i) => lerp(v, cb[i], cover));
-  b[1] -= drop * drop * 1.4;                          // ...they drop away just before the water
+  b[1] -= drop * drop * 1.4;
   return {
     base: b,
     pitch: lerp(HAND_PITCH + 0.03 * Math.sin(t * 1.3), 0.05, cover),
     roll: lerp(side * HAND_INWARD, side * 0.1, cover) - bank * 0.35 * (1 - cover),
-    splay: lerp(1 + 0.08 * Math.sin(t * 0.6 + side), 3.2, cover),   // fingers spread to see through
-    // each finger flexes on its own slow phase; the pinky and ring curl a little more
+    splay: lerp(1 + 0.08 * Math.sin(t * 0.6 + side), 3.2, cover),
     curl: (j, fi) => lerp((0.2 + 0.09 * Math.sin(t * (0.8 + fi * 0.13) + fi * 1.9 + side) + 0.04 * (fi === 3 ? 1 : fi === 2 ? 0.5 : 0))
                           * [0.8, 1, 0.7][j], 0, cover),
   };
 }
 
-// All segments of one hand in camera space: { a, b, burn, bone, id }, plus fingertip points
+// One hand in camera space: flesh polygons { c, burn, id }, bones { a, b, burn }, fingertip points
 function buildHand(side, P) {
-  const segs = [], tips = [];
+  const polys = [], bones = [], tips = [];
   let id = 0;
   const S = HAND_SCALE, cp = Math.cos(P.pitch), spn = Math.sin(P.pitch), cr = Math.cos(P.roll), sr = Math.sin(P.roll);
   const X = (x, y, z) => {
     x *= side * S; y *= S; z *= S;
-    const y1 = y * cp - z * spn, z1 = y * spn + z * cp;           // fingers tipped forward
+    const y1 = y * cp - z * spn, z1 = y * spn + z * cp;
     return [x * cr - y1 * sr + P.base[0], x * sr + y1 * cr + P.base[1], z1 + P.base[2]];
   };
-  const add = (a, b, u, bone) => segs.push({ a: X(...a), b: X(...b), burn: lerp(BURN_TIP, BURN_WRIST, u), bone, id: side * 1000 + id++ });
-  const F = (a, b, u) => add(a, b, u, false), B = (a, b, u) => add(a, b, u, true);
-  const palmZ = x => 0.06 * (x / 0.2) ** 2;                        // slight cup across the palm
+  const poly = (pts, u) => polys.push({ c: pts.map(p => X(p[0], p[1], p[2])), burn: lerp(BURN_TIP, BURN_WRIST, u), id: side * 1000 + id++ });
+  const bone = (a, b, u) => bones.push({ a: X(a[0], a[1], a[2]), b: X(b[0], b[1], b[2]), burn: lerp(BURN_TIP, BURN_WRIST, u) });
+  const palmZ = x => 0.06 * (x / 0.2) ** 2;
   const L3 = (p, q, t) => [lerp(p[0], q[0], t), lerp(p[1], q[1], t), lerp(p[2], q[2], t)];
-
-  // Each phalanx is drawn as SUB curved pieces: the bend is spread along it, the width tapers
-  // smoothly, and the flesh outline is a soft curve rather than a jointed stick.
-  const SUB = 3;
+  const SUB = 2;                                                   // two pieces per phalanx: chunky
   const chain = (fg, fi, isThumb) => {
     const splay = fg.splay * P.splay;
-    const dx = Math.sin(splay), dy = Math.cos(splay);             // along the finger
-    const sx = Math.cos(splay), sy = -Math.sin(splay);            // across it
+    const dx = Math.sin(splay), dy = Math.cos(splay), sx = Math.cos(splay), sy = -Math.sin(splay);
     const off = (p, w, z = 0) => [p[0] + sx * w, p[1] + sy * w, p[2] + z];
     let p = [fg.x, fg.y, palmZ(fg.x)], ang = isThumb ? 0.35 : 0;
     const u0 = isThumb ? 0.05 : 0;
@@ -1864,73 +1994,49 @@ function buildHand(side, P) {
       const w0 = fg.w * (1 - 0.12 * j), w1 = fg.w * (1 - 0.12 * (j + 1));
       const u = u0 + (2 - j) * 0.13;                               // fingertips burn first
       const p0 = p, a0 = ang;
-      F(off(p, -w0 * 0.7, -0.01), off(p, w0 * 0.7, -0.01), u + 0.03);   // joint crease
       for (let s = 0; s < SUB; s++) {
-        ang = a0 + curl * (s + 1) / SUB;                             // the bend spreads along the phalanx
+        ang = a0 + (curl * (s + 1)) / SUB;
         const L = Ln / SUB, ws = lerp(w0, w1, s / SUB), we = lerp(w0, w1, (s + 1) / SUB);
-        const pad = 1 + 0.12 * Math.sin(((s + 0.5) / SUB) * Math.PI) * (j === 2 ? 1 : 0.5);   // a little fullness
         const q = [p[0] + dx * Math.cos(ang) * L, p[1] + dy * Math.cos(ang) * L, p[2] + Math.sin(ang) * L];
-        F(off(p, -ws * pad), off(q, -we * pad), u + 0.02 * s);     // flesh: both sides
-        F(off(p, ws * pad), off(q, we * pad), u + 0.02 * s);
+        poly([off(p, -ws), off(q, -we), off(q, we), off(p, ws)], u + 0.02 * s);
         p = q;
       }
       const q = p;
-      B(L3(p0, q, 0.12), L3(p0, q, 0.88), u);                      // bone, with a gap at each joint
-      const jr = w0 * 0.35;                                        // joint: a small diamond
-      B([p0[0] - jr, p0[1], p0[2]], [p0[0], p0[1] + jr, p0[2]], u); B([p0[0], p0[1] + jr, p0[2]], [p0[0] + jr, p0[1], p0[2]], u);
-      B([p0[0] + jr, p0[1], p0[2]], [p0[0], p0[1] - jr, p0[2]], u); B([p0[0], p0[1] - jr, p0[2]], [p0[0] - jr, p0[1], p0[2]], u);
+      bone(L3(p0, q, 0.12), L3(p0, q, 0.88), u);
       if (j === 2) {
-        // fingertip: a rounded cap of three pieces
         const ex = dx * Math.cos(ang), ey = dy * Math.cos(ang), ez = Math.sin(ang);
         const tc = [q[0] + ex * w1 * 0.9, q[1] + ey * w1 * 0.9, q[2] + ez * w1 * 0.9];
         const t1 = [q[0] + ex * w1 * 0.6 - sx * w1 * 0.7, q[1] + ey * w1 * 0.6 - sy * w1 * 0.7, q[2] + ez * w1 * 0.6];
         const t2 = [q[0] + ex * w1 * 0.6 + sx * w1 * 0.7, q[1] + ey * w1 * 0.6 + sy * w1 * 0.7, q[2] + ez * w1 * 0.6];
-        F(off(q, -w1), t1, u); F(t1, tc, u); F(tc, t2, u); F(t2, off(q, w1), u);
-        const n0 = L3(p0, q, 0.5);                                 // fingernail, on the back
-        F(off(n0, -w1 * 0.55, -0.012), off(q, -w1 * 0.5, -0.012), u);
-        F(off(n0, w1 * 0.55, -0.012), off(q, w1 * 0.5, -0.012), u);
-        F(off(n0, -w1 * 0.55, -0.012), off(n0, w1 * 0.55, -0.012), u);
-        tips.push(X(...tc));
+        poly([off(q, -w1), t1, tc, t2, off(q, w1)], u);
+        tips.push(X(tc[0], tc[1], tc[2]));
       }
     }
   };
   FINGERS.forEach((fg, i) => chain(fg, i, false));
   chain(THUMB, 4, true);
-
-  // Palm: knuckle ridge, sides, thumb web, wrist, forearm (flesh)
   const P3 = (x, y, dz = 0) => [x, y, palmZ(x) + dz];
   const kn = FINGERS.map(f => P3(f.x, f.y, -0.02));
-  for (let i = 1; i < kn.length; i++) {                            // knuckle ridge: a gentle arch between each pair
-    const m = L3(kn[i - 1], kn[i], 0.5); m[1] += 0.012;
-    F(kn[i - 1], m, 0.42); F(m, kn[i], 0.42);
-  }
-  // the outline, as short pieces so it reads as a curve
-  const outline = (pts, u) => { for (let i = 1; i < pts.length; i++) F(pts[i - 1], pts[i], u + (i / pts.length) * 0.1); };
-  outline([kn[3], P3(0.21, 0.5), P3(0.215, 0.38), P3(0.205, 0.24), P3(0.19, 0.12), P3(0.175, 0.04), P3(0.17, 0)], 0.5);          // pinky side
-  outline([kn[0], P3(-0.215, 0.5), P3(-0.218, 0.4), P3(-0.205, 0.27)], 0.5);                                                    // index side
-  outline([P3(-0.205, 0.27), P3(-0.2, 0.2), P3(THUMB.x + 0.02, THUMB.y + 0.1)], 0.6);                                          // thumb web
-  outline([P3(THUMB.x - 0.02, THUMB.y - 0.02), P3(-0.2, 0.06), P3(-0.17, 0)], 0.75);                                          // heel of the thumb
-  F(P3(-0.17, 0), P3(0.17, 0), 0.82);                              // wrist crease
-  F(P3(-0.17, 0), [-0.21, -0.45, 0.02], 0.92); F(P3(0.17, 0), [0.22, -0.45, 0.02], 0.92);   // forearm
-  // Palm bones: metacarpals, the thumb's, a ring of carpals, radius and ulna
+  poly([kn[0], kn[1], kn[2], kn[3], P3(0.21, 0.5), P3(0.215, 0.38), P3(0.205, 0.24), P3(0.19, 0.12), P3(0.175, 0.04), P3(0.17, 0),
+        P3(-0.17, 0), P3(-0.2, 0.06), P3(THUMB.x - 0.02, THUMB.y - 0.02), P3(-0.2, 0.2), P3(-0.205, 0.27), P3(-0.218, 0.4), P3(-0.215, 0.5)], 0.55);   // palm
+  poly([P3(-0.17, 0), P3(0.17, 0), [0.22, -0.45, 0.02], [-0.21, -0.45, 0.02]], 0.92);                                                              // forearm
   const carp = [-0.09, -0.03, 0.03, 0.09];
-  FINGERS.forEach((f, i) => B(P3(carp[i], 0.11), P3(f.x, f.y - 0.03), 0.45));
-  B(P3(THUMB.x + 0.07, 0.05), P3(THUMB.x, THUMB.y), 0.5);
+  FINGERS.forEach((f, i) => bone(P3(carp[i], 0.11), P3(f.x, f.y - 0.03), 0.45));
+  bone(P3(THUMB.x + 0.07, 0.05), P3(THUMB.x, THUMB.y), 0.5);
   for (let i = 0; i < 6; i++) {
     const a1 = (i / 6) * Math.PI * 2, a2 = ((i + 1) / 6) * Math.PI * 2;
-    B([Math.cos(a1) * 0.08, 0.05 + Math.sin(a1) * 0.035, 0], [Math.cos(a2) * 0.08, 0.05 + Math.sin(a2) * 0.035, 0], 0.8);
+    bone([Math.cos(a1) * 0.08, 0.05 + Math.sin(a1) * 0.035, 0], [Math.cos(a2) * 0.08, 0.05 + Math.sin(a2) * 0.035, 0], 0.8);
   }
-  B([-0.07, 0, 0], [-0.1, -0.45, 0.02], 0.95); B([0.07, 0, 0], [0.1, -0.45, 0.02], 0.95);
-  return { segs, tips };
+  bone([-0.07, 0, 0], [-0.1, -0.45, 0.02], 0.95); bone([0.07, 0, 0], [0.1, -0.45, 0.02], 0.95);
+  return { polys, bones, tips };
 }
 
-// Burnt flesh breaks into two glowing pieces that tumble away (screen space)
+// Burnt flesh breaks into two pieces that tumble away (virtual screen space)
 function spawnFrag(a, b) {
   for (let k = 0; k < 2 && frags.length < FRAG_CAP; k++) {
     const x1 = lerp(a[0], b[0], k / 2), y1 = lerp(a[1], b[1], k / 2), x2 = lerp(a[0], b[0], (k + 1) / 2), y2 = lerp(a[1], b[1], (k + 1) / 2);
     frags.push({ cx: (x1 + x2) / 2, cy: (y1 + y2) / 2, hx: (x2 - x1) / 2, hy: (y2 - y1) / 2,
-                 vx: (Math.random() - 0.5) * 70, vy: -20 - Math.random() * 50, spin: (Math.random() - 0.5) * 8,
-                 life: 0, max: 0.8 + Math.random() * 0.8 });
+                 vx: (Math.random() - 0.5) * 70, vy: -20 - Math.random() * 50, spin: (Math.random() - 0.5) * 8, life: 0, max: 0.8 + Math.random() * 0.8 });
   }
 }
 function updateFrags(dt) {
@@ -1943,73 +2049,48 @@ function updateFrags(dt) {
   });
 }
 
-// Project, burn and draw both hands, then the falling fragments
+// Project, burn and draw both hands (back pieces first), then the bones, fragments and sparks
 function drawBody(now) {
-  const fleshP = Array.from({ length: WIRE_LEVELS }, () => new Path2D());
-  const boneP = Array.from({ length: WIRE_LEVELS }, () => new Path2D());
-  const charP = new Path2D();
-  const proj = c => { const z = Math.max(0.2, c[2]); return [W / 2 + c[0] * FOCAL / z, H / 2 - c[1] * FOCAL / z, z]; };
-  const depth = z => clamp(1.15 - (z - 0.7) * 0.9, 0.3, 1);      // depth fade, like the world
-  const lvl = b => Math.round(clamp(b, 0, 1) * (WIRE_LEVELS - 1));
-  handTips = []; handPtsScreen = [];
+  const proj = c => { const z = Math.max(0.2, c[2]); return [(W / 2 + ((c[0] - handEye) * FOCAL) / z) * FBS, (H / 2 - (c[1] * FOCAL) / z) * FBS, z]; };
+  const first = eyeNow <= 0;
+  if (first) { handTips = []; handPtsScreen = []; }
+  const all = [], boneSegs = [];
   for (const side of [-1, 1]) {
-    const { segs, tips } = buildHand(side, handPose(now, side));
-    for (const tp of tips) { const s = proj(tp); handTips.push({ x: s[0], y: s[1] }); }
-    for (const sg of segs) {
-      const a = proj(sg.a), b = proj(sg.b), d = depth((a[2] + b[2]) / 2), f = burnAmt - sg.burn;
-      if (sg.bone) {                                  // bones show where the flesh has gone
-        const reveal = clamp((f + 0.06) / 0.12, 0, 1);
-        if (reveal <= 0.02) continue;
-        const p = boneP[lvl(d * reveal)]; p.moveTo(a[0], a[1]); p.lineTo(b[0], b[1]);
-        continue;
-      }
-      if (f >= 0) {                                   // burnt away
-        if (!burnt.has(sg.id)) { burnt.add(sg.id); spawnFrag(a, b); }
-        continue;
-      }
-      if (f < -0.12) burnt.delete(sg.id);             // cooled: the flesh grows back
-      if (f > -0.08) {                                // charring: flickers and darkens first, sparks lift off
-        const k = (f + 0.08) / 0.08;
-        if (embers.length < EMBER_CAP && Math.random() < k * 0.35) {
-          const u = Math.random();
-          embers.push({ x: lerp(a[0], b[0], u), y: lerp(a[1], b[1], u), vx: (Math.random() - 0.5) * 30,
-                        vy: -40 - Math.random() * 70, life: 0, max: 0.5 + Math.random() * 0.8, s: 1.5 + Math.random() * 1.5 });
-        }
-        if (Math.random() < k * 0.5) continue;
-        charP.moveTo(a[0], a[1]); charP.lineTo(b[0], b[1]);
-        continue;
-      }
-      const p = fleshP[lvl(d)]; p.moveTo(a[0], a[1]); p.lineTo(b[0], b[1]);
-      if (Math.random() < 0.04) handPtsScreen.push({ x: a[0], y: a[1] });
+    const { polys, bones, tips } = buildHand(side, handPose(now, side));
+    if (first) for (const tp of tips) { const s = proj(tp); handTips.push({ x: s[0] / FBS, y: s[1] / FBS }); }
+    for (const pg of polys) { const pts = pg.c.map(proj); let z = 0; for (const p of pts) z += p[2]; all.push({ pg, pts, z: z / pts.length }); }
+    for (const b of bones) boneSegs.push(b);
+  }
+  all.sort((a, b) => b.z - a.z);
+  for (const { pg, pts } of all) {
+    const f = burnAmt - pg.burn;
+    if (f >= 0) {                                    // burnt away
+      if (!burnt.has(pg.id)) { burnt.add(pg.id); spawnFrag([pts[0][0] / FBS, pts[0][1] / FBS], [pts[1][0] / FBS, pts[1][1] / FBS]); }
+      continue;
     }
+    if (f < -0.12) burnt.delete(pg.id);              // cooled: the flesh grows back
+    const flat = [];
+    for (const p of pts) flat.push(p[0], p[1]);
+    if (f > -0.08) {                                 // charring: the edge flickers dim, sparks lift off
+      const k = (f + 0.08) / 0.08;
+      if (first && embers.length < EMBER_CAP && Math.random() < k * 0.35) {
+        const a = pts[0], b = pts[1], u = Math.random();
+        embers.push({ x: lerp(a[0], b[0], u) / FBS, y: lerp(a[1], b[1], u) / FBS, vx: (Math.random() - 0.5) * 30, vy: -40 - Math.random() * 70, life: 0, max: 0.5 + Math.random() * 0.8, s: 2 });
+      }
+      pxFill(flat, 0); pxOutline(flat, Math.random() < k * 0.5 ? 85 : 170);
+      continue;
+    }
+    pxFill(flat, 0); pxOutline(flat, 255);
+    if (first && Math.random() < 0.04) handPtsScreen.push({ x: pts[0][0] / FBS, y: pts[0][1] / FBS });
   }
-  ctx.save();
-  ctx.lineCap = "round"; ctx.lineJoin = "round";
-  // a soft glow under the flesh lines, warmer with heat
-  ctx.strokeStyle = heat > 0.3 ? `rgba(255, ${Math.round(90 - 60 * heat)}, 20, ${0.14 + 0.1 * heat})` : HAND_GLOW;
-  ctx.lineWidth = 5;
-  for (let i = 0; i < WIRE_LEVELS; i++) { ctx.globalAlpha = 0.3 + 0.7 * (i / (WIRE_LEVELS - 1)); ctx.stroke(fleshP[i]); }
-  for (let i = 0; i < WIRE_LEVELS; i++) {
-    const t = i / (WIRE_LEVELS - 1);
-    ctx.lineWidth = 1 + t * 1.2;
-    ctx.globalAlpha = 0.2 + 0.8 * t;
-    ctx.strokeStyle = RED; ctx.stroke(fleshP[i]);
-    ctx.strokeStyle = BONE; ctx.stroke(boneP[i]);
+  for (const b of boneSegs) {                        // bones show where the flesh has gone
+    const reveal = clamp((burnAmt - b.burn + 0.06) / 0.12, 0, 1);
+    if (reveal < 0.3) continue;
+    const p = proj(b.a), q = proj(b.b);
+    pxLine(p[0], p[1], q[0], q[1], reveal > 0.7 ? 255 : 170);
   }
-  ctx.globalAlpha = 0.55 + Math.random() * 0.4;
-  ctx.lineWidth = 1.6; ctx.strokeStyle = CHAR; ctx.stroke(charP);
-  ctx.strokeStyle = CHAR; ctx.lineWidth = 1.4;
-  for (const f of frags) {                            // flakes of burnt flesh, cooling as they fall
-    ctx.globalAlpha = 1 - f.life / f.max;
-    ctx.beginPath(); ctx.moveTo(f.cx - f.hx, f.cy - f.hy); ctx.lineTo(f.cx + f.hx, f.cy + f.hy); ctx.stroke();
-  }
-  for (const e of embers) {                           // sparks, orange to red as they rise and die
-    const k = e.life / e.max;
-    ctx.globalAlpha = 1 - k;
-    ctx.fillStyle = k < 0.4 ? "rgb(255, 180, 60)" : k < 0.7 ? CHAR : RED;
-    ctx.fillRect(e.x - e.s / 2, e.y - e.s / 2, e.s, e.s);
-  }
-  ctx.restore();
+  for (const f of frags) { const v = lvOf(1 - f.life / f.max); if (v) pxLine((f.cx - f.hx) * FBS, (f.cy - f.hy) * FBS, (f.cx + f.hx) * FBS, (f.cy + f.hy) * FBS, v); }
+  for (const e of embers) { const v = lvOf(1 - e.life / e.max); if (v) pxRect(e.x * FBS, e.y * FBS, 1, 1, v); }
 }
 function updateEmbers(dt) {
   embers = embers.filter(e => {
@@ -2024,33 +2105,14 @@ function spawnFeathers(dt) {
   const rate = Math.max(0, Math.abs(yawRate) - 0.5) * 4 + thrustEff * 2 + barrelNow() * 10;
   if (Math.random() >= rate * dt) return;
   const p = handPtsScreen[(Math.random() * handPtsScreen.length) | 0];
-  feathers.push({
-    x: p.x, y: p.y, vx: -yawRate * 120 + (Math.random() - 0.5) * 40, vy: -20 + Math.random() * 30,
-    ph: Math.random() * 6.28, life: 0, max: 1.4 + Math.random() * 1.2, size: 1.4 + Math.random() * 1.2,
-  });
-}
-function drawSunWithLies(now, sun) {
-  if (!lie || sun.r < 2) { drawSun(now, sun); return; }
-  const u = clamp((now - lie.start) / (lie.end - lie.start), 0, 1), env = Math.sin(u * Math.PI);
-  if (lie.kind === "double") {
-    drawSun(now, sun);
-    drawSun(now, { ...sun, x: sun.x + lie.dx * sun.r * 1.4 * env, y: sun.y + lie.dy * sun.r * env, face: 0 });
-  } else {
-    drawSun(now, { ...sun, x: sun.x + lie.dx * sun.r * 1.2 * env, y: sun.y + lie.dy * sun.r * env });
-  }
+  feathers.push({ x: p.x, y: p.y, vx: -yawRate * 120 + (Math.random() - 0.5) * 40, vy: -20 + Math.random() * 30,
+                  ph: Math.random() * 6.28, life: 0, max: 1.4 + Math.random() * 1.2, size: 1.4 + Math.random() * 1.2 });
 }
 
-// One line of text on the canvas (so it's in the saved video)
+// One line of text in the panel's type (so it's in the saved video)
 function caption(text, a, y = H * 0.42) {
-  if (a <= 0.01) return;
-  ctx.save();
-  ctx.globalAlpha = clamp(a, 0, 1);
-  ctx.font = `italic 700 34px ${SF}`;
-  ctx.textAlign = "center"; ctx.textBaseline = "middle"; ctx.lineJoin = "round";
-  const t = glitchText(text);
-  ctx.lineWidth = 5; ctx.strokeStyle = "#000"; ctx.strokeText(t, W / 2, y);   // the site's hard outline
-  ctx.fillStyle = RED; ctx.fillText(t, W / 2, y);
-  ctx.restore();
+  if (a <= 0.15) return;
+  pxText(glitchText(text), FB_W / 2, Math.round(y * FBS) - 7, 2, a > 0.6 ? 255 : 170, "center", true);
 }
 
 // ---------- The ones before you: dot figures falling past; some climb beside you first ----------
@@ -2058,23 +2120,22 @@ function spawnFigures(dt) {
   const rate = lerp(FIG_RATE_LOW, FIG_RATE_HIGH, altitude * altitude);
   if (figures.length >= FIG_MAX || Math.random() >= rate * dt) return;
   const f = { t: 0, seed: Math.random() * 10, dropped: false };
-  if (Math.random() < FIG_CLIMBER) {        // still climbing beside you, for a few seconds
+  if (Math.random() < FIG_CLIMBER) {
     place(f, 3 + Math.random() * 3, side() * (2.5 + Math.random() * 1.5));
     f.y = view.h + 0.3 + Math.random() * 0.6; f.vy = 0.4; f.climb = 3 + Math.random() * 2;
     f.ang = 0; f.spin = 0;
-  } else {                                  // falling from above, tumbling
+  } else {
     place(f, 8 + Math.random() * 16, side() * (1.5 + Math.random() * 8));
     f.y = view.h + 7 + Math.random() * 4; f.vy = -1 - Math.random() * 2; f.climb = 0;
     f.ang = Math.random() * 6.28; f.spin = (Math.random() - 0.5) * 4;
   }
   figures.push(f);
 }
-
 function updateFigures(dt) {
   figures = figures.filter(f => {
     f.t += dt;
     if (f.climb > 0 && f.t < f.climb && mode === "live") {
-      f.x += view.hx * fwdSpeed * dt; f.z += view.hz * fwdSpeed * dt;   // keeps pace with you
+      f.x += view.hx * fwdSpeed * dt; f.z += view.hz * fwdSpeed * dt;
       f.y += f.vy * dt;
     } else {
       if (f.climb > 0 && !f.dropped) { f.dropped = true; f.vy = 0; f.spin = (Math.random() - 0.5) * 3; }
@@ -2083,8 +2144,6 @@ function updateFigures(dt) {
     return f.y > -3 && f.t < 30;
   });
 }
-
-// A body like yours was: head ring, torso, arms out, legs, as (u across, v up) points
 function figurePoints(f) {
   const climbing = f.climb > 0 && !f.dropped;
   const armLift = climbing ? Math.sin(f.t * 9) * 0.35 : 0.4 + Math.sin(f.t * 13 + f.seed) * 0.25;
@@ -2097,18 +2156,19 @@ function figurePoints(f) {
   }
   return P;
 }
-
 function drawFigures() {
-  const rx = view.hz, rz = -view.hx;                 // billboard: faces you
+  const rx = view.hz, rz = -view.hx;
   for (const f of figures) {
-    const ca = Math.cos(f.ang), sa = Math.sin(f.ang);
-    for (const [u, v] of figurePoints(f)) {
-      const vv = v - 0.9, ur = u * ca - vv * sa, vr = u * sa + vv * ca;   // tumble about the waist
-      const c = toCam(f.x + rx * ur, f.y + vr, f.z + rz * ur);
-      if (c[2] < NEAR) continue;
-      const [sx, sy] = toScreen(c);
-      wireDot(sx, sy, clamp(60 / c[2], 1.5, 7), 0.15 + 0.85 * depthB(c[2], VIEW_FAR * 1.3));
-    }
+    defer(Math.hypot(f.x - view.x, f.z - travel), () => {
+      const ca = Math.cos(f.ang), sa = Math.sin(f.ang);
+      for (const [u, v] of figurePoints(f)) {
+        const vv = v - 0.9, ur = u * ca - vv * sa, vr = u * sa + vv * ca;
+        const c = toCam(f.x + rx * ur, f.y + vr, f.z + rz * ur);
+        if (c[2] < NEAR) continue;
+        const [sx, sy] = toScreen(c);
+        wireDot(sx, sy, clamp(60 / c[2], 3, 7), 0.15 + 0.85 * depthB(c[2], VIEW_FAR * 1.3));
+      }
+    });
   }
 }
 
@@ -2126,7 +2186,6 @@ function saveGhost(path) {
   try { localStorage.setItem(GHOST_KEY, JSON.stringify(ghosts)); }
   catch (e) { console.warn("Couldn't save ghosts", e); }
 }
-// A few points per second, relative to where (and which way) this flight took off
 function recordGhost(now) {
   if (!flight || !flightOrigin || now - lastGhostRec < GHOST_STEP || ghostPath.length >= GHOST_POINTS * 3) return;
   lastGhostRec = now;
@@ -2136,18 +2195,16 @@ function recordGhost(now) {
 }
 function drawGhosts() {
   if (!ghosts.length) return;
-  // Laid out from this flight's take-off; before take-off, from where you are now
   const o = flightOrigin || { x: view.x, z: travel, hx: view.hx, hz: view.hz };
   const far = VIEW_FAR * 1.3;
   ghosts.forEach((g, gi) => {
-    const age = 0.45 + 0.55 * ((gi + 1) / ghosts.length);     // older flights fainter
+    const age = 0.45 + 0.55 * ((gi + 1) / ghosts.length);
     let px = 0, pz = 0, py = 0, has = false;
     for (let i = 0; i + 2 < g.length; i += 3) {
       const f = g[i], l = g[i + 1];
       const x = o.x + o.hx * f + o.hz * l, z = o.z + o.hz * f - o.hx * l, y = g[i + 2];
       if (has) {
-        const mx = (x + px) / 2, mz = (z + pz) / 2;
-        const d = Math.hypot(mx - view.x, mz - travel);
+        const mx = (x + px) / 2, mz = (z + pz) / 2, d = Math.hypot(mx - view.x, mz - travel);
         if (d < far && (vloop || fwdOf(mx, mz) > -2)) seg3(px, py, pz, x, y, z, 0.22 * age * (0.3 + 0.7 * depthB(d, far)));
       }
       px = x; pz = z; py = y; has = true;
@@ -2156,50 +2213,41 @@ function drawGhosts() {
 }
 
 // ---------- The father: a tiny wire figure on the ground; shrinks as you climb ----------
-// A standing wire figure on the ground at (fx, fz), facing you, scaled by sc
 function drawStanding(fx, fz, sc, b) {
   const rx = view.hz, rz = -view.hx;
   const L = (u1, v1, u2, v2) => seg3(fx + rx * u1 * sc, v1 * sc, fz + rz * u1 * sc, fx + rx * u2 * sc, v2 * sc, fz + rz * u2 * sc, b);
-  for (let i = 0; i < 6; i++) {                     // head, tipped back a little: looking up
+  for (let i = 0; i < 6; i++) {
     const a1 = (i / 6) * Math.PI * 2, a2 = ((i + 1) / 6) * Math.PI * 2;
     L(Math.cos(a1) * 0.09, 1.0 + Math.sin(a1) * 0.09, Math.cos(a2) * 0.09, 1.0 + Math.sin(a2) * 0.09);
   }
-  L(0, 0.9, 0, 0.5);                                 // body
-  L(0, 0.82, -0.18, 0.58); L(0, 0.82, 0.18, 0.58);   // arms at his sides
-  L(0, 0.5, -0.1, 0); L(0, 0.5, 0.1, 0);             // legs
+  L(0, 0.9, 0, 0.5); L(0, 0.82, -0.18, 0.58); L(0, 0.82, 0.18, 0.58); L(0, 0.5, -0.1, 0); L(0, 0.5, 0.1, 0);
 }
-
 function drawFather() {
   const sky = clamp((viewAlt - SEA_LINE) / (1 - SEA_LINE), 0, 1);
   const sc = mode === "melt" ? 1 : lerp(1, 0.4, sky);
-  const fx = father.x, fz = father.z;
-  const d = Math.hypot(fx - view.x, fz - travel);
+  const fx = father.x, fz = father.z, d = Math.hypot(fx - view.x, fz - travel);
   const b = 0.35 + 0.6 * depthB(d, VIEW_FAR * 1.5);
-  drawStanding(fx, fz, sc, b);
-  if (mode === "melt") {                             // standing on a rock in the sea
-    const rock = [];
-    for (let i = 0; i <= 9; i++) {
-      const a = (i / 9) * Math.PI * 2, r = 0.7 + 0.2 * Math.sin(i * 2.7);
-      rock.push([fx + Math.cos(a) * r, 0.05, fz + Math.sin(a) * r]);
+  defer(d, () => {
+    drawStanding(fx, fz, sc, b);
+    if (mode === "melt") {
+      const rock = [];
+      for (let i = 0; i <= 7; i++) { const a = (i / 7) * Math.PI * 2, r = 0.7 + 0.2 * Math.sin(i * 2.7); rock.push([fx + Math.cos(a) * r, 0.05, fz + Math.sin(a) * r]); }
+      for (let i = 1; i < rock.length; i++) seg3(...rock[i - 1], ...rock[i], b * 0.8);
     }
-    for (let i = 1; i < rock.length; i++) seg3(...rock[i - 1], ...rock[i], b * 0.8);
-  }
+  });
 }
 
 // ---------- The sea, rushing up during the long fall ----------
 function drawSea(now, amt) {
   const t = now / 1000;
   const cx = Math.round(father.x / SEA_SPACING) * SEA_SPACING, cz = Math.round(father.z / SEA_SPACING) * SEA_SPACING;
-  const step = 6, far = SEA_HALF * 1.2;
-  for (let k = 0; k < SEA_LINES; k++) {
+  const step = 8, far = SEA_HALF * 1.2;
+  for (let k = 0; k < SEA_LINES; k += 2) {
     const z = cz - SEA_HALF + k * SEA_SPACING;
     let px = 0, py = 0, has = false;
     for (let x = cx - SEA_HALF; x <= cx + SEA_HALF; x += step) {
       const y = 0.12 * Math.sin(x * 0.45 + t * 1.8 + k * 0.9);
-      if (has) {
-        const d = Math.hypot((x + px) / 2 - view.x, z - travel);
-        seg3(px, py, z, x, y, z, amt * (0.2 + 0.7 * depthB(d, far)));
-      }
+      if (has) { const d = Math.hypot((x + px) / 2 - view.x, z - travel); seg3(px, py, z, x, y, z, amt * (0.2 + 0.7 * depthB(d, far))); }
       px = x; py = y; has = true;
     }
   }
@@ -2208,64 +2256,58 @@ function drawSea(now, amt) {
 // ---------- Horizon: the line at infinity, tilted by pitch and roll ----------
 function drawHorizon() {
   if (Math.abs(view.cp) <= 0.02) return;
-  const y0 = clamp(focal * view.sp / view.cp, -1e5, 1e5);   // below centre when looking up; flips when inverted
+  const y0 = clamp((focal * view.sp) / view.cp, -1e5, 1e5);
   const ends = [[-W, y0], [W, y0]].map(([a, b]) => [W / 2 + a * view.cr - b * view.sr, H / 2 + a * view.sr + b * view.cr]);
-  wire(ends[0][0], ends[0][1], ends[1][0], ends[1][1], 0.9);
+  wire(ends[0][0], ends[0][1], ends[1][0], ends[1][1], 0.5);
 }
 
-// ---------- Ground grid: world-aligned, so turning swings it; scrolls under the bottom edge ----------
-// Lines in both world axes over a square centred ahead of you, sliced so each piece
-// fades by its own distance; pieces behind you or past the fade are skipped.
+// ---------- Ground grid: world-aligned, so turning swings it; sliced so each piece fades on its own ----------
 function drawGround() {
   const half = (GRID_LINES * GRID) / 2, bias = vloop ? 0 : half - 4;
   const cx = Math.round((view.x + view.hx * bias) / GRID) * GRID;
   const cz = Math.round((travel + view.hz * bias) / GRID) * GRID;
-  const SL = 4;                                     // slice length
+  const SL = 6;
   const piece = (x1, z1, x2, z2) => {
     const mx = (x1 + x2) / 2, mz = (z1 + z2) / 2;
     if (!vloop && fwdOf(mx, mz) < -SL) return;
     const d = Math.hypot(mx - view.x, mz - travel);
     if (d > VIEW_FAR) return;
-    seg3(x1, 0, z1, x2, 0, z2, depthB(d, VIEW_FAR) * clamp((VIEW_FAR - d) / 4, 0, 1));
+    seg3(x1, 0, z1, x2, 0, z2, 0.75 * depthB(d, VIEW_FAR) * clamp((VIEW_FAR - d) / 4, 0, 1));
   };
   for (let i = 0; i <= GRID_LINES; i++) {
     const u = -half + i * GRID;
-    for (let s = -half; s < half; s += SL) {
-      piece(cx + u, cz + s, cx + u, cz + s + SL);   // lines along z
-      piece(cx + s, cz + u, cx + s + SL, cz + u);   // lines along x
-    }
+    for (let s = -half; s < half; s += SL) { piece(cx + u, cz + s, cx + u, cz + s + SL); piece(cx + s, cz + u, cx + s + SL, cz + u); }
   }
 }
 
-// Fade for scenery at distance d (dim far away, fades in at the far end)
 const sceneryB = d => depthB(d, VIEW_FAR * 1.2) * clamp((VIEW_FAR * 1.2 - d) / 5, 0, 1);
 const distOf = o => Math.hypot(o.x - view.x, o.z - travel);
-// Passed behind you or far off to the side of your heading → respawn far ahead
 const passed = (o, behind, wide) => fwdOf(o.x, o.z) < behind || Math.abs(latOf(o.x, o.z)) > wide;
 
-// ---------- Clouds: eye-level outlines that part around the camera ----------
+// ---------- Clouds: solid outlines at eye level that part around the camera ----------
 function drawClouds() {
   for (const c of cloudShapes) {
     respawn(c, spawnCloud, 0.3, 40);
     const d = Math.max(0, fwdOf(c.x, c.z)), n = c.pts.length, y = view.h + c.yRel;
     const b = 0.85 * depthB(d, VIEW_FAR) * clamp((VIEW_FAR - d) / 4, 0, 1);
+    if (b <= 0.04) continue;
     const split = d < CLOUD_SPLIT ? 3.5 * Math.pow(1 - d / CLOUD_SPLIT, 1.5) : 0;
-    const rx = view.hz, rz = -view.hx;              // faces you: laid out along your right vector
+    const rx = view.hz, rz = -view.hx;
     const half = (from, to, off) => {
-      for (let i = from; i < to; i++) {
-        const p = c.pts[i % n], q = c.pts[(i + 1) % n];
-        const pu = p[0] + off, qu = q[0] + off;
-        seg3(c.x + rx * pu, y + p[1], c.z + rz * pu, c.x + rx * qu, y + q[1], c.z + rz * qu, b);
-      }
+      const cam = [];
+      for (let i = from; i <= to; i++) { const p = c.pts[i % n], u = p[0] + off; cam.push(toCam(c.x + rx * u, y + p[1], c.z + rz * u)); }
+      face(cam, lvOf(b));
     };
-    if (split <= 0) half(0, n, 0);
-    else { half(n / 4, (3 * n) / 4, -split); half((3 * n) / 4, n + n / 4, split); }   // left half, right half
+    defer(Math.hypot(c.x - view.x, c.z - travel), () => {
+      if (split <= 0) half(0, n - 1, 0);
+      else { half(n / 4, (3 * n) / 4, -split); half((3 * n) / 4, n + n / 4, split); }
+    });
   }
 }
 
-// ---------- Speed lines: red streaks rushing past once you're flying fast ----------
+// ---------- Speed lines: streaks rushing past once you're flying fast ----------
 function drawSpeedLines() {
-  const show = clamp((fwdSpeed - 6) / 6 + Math.max(0, thrustEff) + barrelNow() * 0.6, 0, 1);   // surge under thrust / a roll
+  const show = clamp((fwdSpeed - 6) / 6 + Math.max(0, thrustEff) + barrelNow() * 0.6, 0, 1);
   const len = fwdSpeed * (0.07 + 0.05 * Math.max(0, thrustEff));
   for (const p of speedLines) {
     if (passed(p, 0.3, 8)) spawnSpeed(p, 14 + Math.random() * 8);
@@ -2275,53 +2317,61 @@ function drawSpeedLines() {
   }
 }
 
-// ---------- The far skyline: a jagged range all round, fixed by world bearing ----------
+// ---------- The far skyline: a solid jagged range all round (it hides the sun's lower edge) ----------
 function drawRidge() {
-  const half = Math.PI;                               // all the way round (behind-the-camera pieces clip away)
+  const half = Math.PI, N = 48;
   const hAt = a => 2.5 + 2.2 * Math.abs(Math.sin(a * 3 + RIDGE_SEED)) + 1.6 * Math.sin(a * 7.3 + RIDGE_SEED * 2)
                  + 0.9 * Math.sin(a * 17 + RIDGE_SEED * 3) + 0.5 * Math.sin(a * 41);
   let px = 0, py = 0, pz = 0, has = false;
-  for (let i = 0; i <= RIDGE_N; i++) {
-    const a = view.yaw - half + (i / RIDGE_N) * half * 2;
+  for (let i = 0; i <= N; i++) {
+    const a = view.yaw - half + (i / N) * half * 2;
     const x = view.x + Math.sin(a) * RIDGE_D, z = travel + Math.cos(a) * RIDGE_D, y = Math.max(0, hAt(a));
-    if (has) seg3(px, py, pz, x, y, z, 0.2);
+    if (has) {
+      face([toCam(px, 0, pz), toCam(px, py, pz), toCam(x, y, z), toCam(x, 0, z)], 0);
+      seg3(px, py, pz, x, y, z, 0.2);
+    }
     px = x; py = y; pz = z; has = true;
   }
 }
 
 // ============================================================
-// v3: the highway at night. Endless poles and sagging wires, motels, gas stations, overpasses,
-// and billboards selling the site's own ads, until they start talking about you.
-// The higher you climb, the stranger it gets.
+// The highway at night: poles and sagging wires, motels, gas stations, overpasses, and billboards
+// selling the site's own ads, until they start talking about you. Higher = stranger.
 // ============================================================
 const weirdNow = () => clamp((viewAlt - WEIRD_FROM) / (WEIRD_FULL - WEIRD_FROM), 0, 1);
 function hash1(n) { const s = Math.sin(n * 127.1 + 311.7) * 43758.5453; return s - Math.floor(s); }
-// Depth fade for a fixed world point (dim far off, fading in at the far end)
 function fadeAt(x, z) {
   const d = Math.hypot(x - view.x, z - travel);
   return d >= VIEW_FAR ? 0 : depthB(d, VIEW_FAR) * clamp((VIEW_FAR - d) / 4, 0, 1);
 }
-// Parallel highways along z, every HWY_SPACING across x: the ones near enough to see
 function roadsNear() {
   const k0 = Math.round(view.x / HWY_SPACING), out = [];
   for (let k = k0 - 1; k <= k0 + 1; k++) { const rx = k * HWY_SPACING; if (Math.abs(rx - view.x) < VIEW_FAR + POLE_X) out.push(rx); }
   return out;
 }
+// Solid things are queued with their distance and drawn far to near (painter's algorithm)
+let DL = [];
+const defer = (d, f) => { DL.push({ d, f }); };
 
-// The road: edges and a dashed centre line, sliced so each piece fades by its own distance
 function drawHighway() {
   const z0 = travel - VIEW_FAR, z1 = travel + VIEW_FAR, SL = 4;
   for (const rx of roadsNear()) {
     for (let z = Math.floor(z0 / SL) * SL; z < z1; z += SL) {
-      for (const x of [rx - HWY_HALF, rx + HWY_HALF]) { const b = fadeAt(x, z + SL / 2); if (b > 0.02) seg3(x, 0, z, x, 0, z + SL, b); }
+      for (const x of [rx - HWY_HALF, rx + HWY_HALF]) { const b = fadeAt(x, z + SL / 2); if (b > 0.04) seg3(x, 0, z, x, 0, z + SL, b); }
     }
     for (let z = Math.floor(z0 / (DASH * 2)) * DASH * 2; z < z1; z += DASH * 2) {
-      const b = fadeAt(rx, z) * 0.7; if (b > 0.02) seg3(rx, 0, z, rx, 0, z + DASH, b);
+      const b = fadeAt(rx, z) * 0.7; if (b > 0.04) seg3(rx, 0, z, rx, 0, z + DASH, b);
     }
   }
 }
 
-// Cars on the nearest road: pairs of lights, recycled as they leave the view
+// Cars on the nearest road: little solid boxes with their lights, recycled as they leave the view
+function lightDot(x, y, z, v) {
+  const p = toCam(x, y, z);
+  if (p[2] <= NEAR) return;
+  const s = toScreen(p), sz = clamp(Math.round(10 / p[2]), 1, 3);
+  pxRect(s[0] * FBS - sz / 2, s[1] * FBS - sz / 2, sz, sz, v);
+}
 function drawCars(dt) {
   const rx = Math.round(view.x / HWY_SPACING) * HWY_SPACING;
   for (const c of cars) {
@@ -2329,13 +2379,13 @@ function drawCars(dt) {
     if (c.z - travel > VIEW_FAR) c.z = travel - VIEW_FAR * 0.3;
     else if (c.z - travel < -VIEW_FAR * 0.3) c.z = travel + VIEW_FAR * 0.95;
     const x = rx + c.lane, b = fadeAt(x, c.z);
-    if (b <= 0.02) continue;
-    wireBlue = c.v < 0;                                   // oncoming: blue headlights; yours: red tail lights
-    for (const o of [-0.35, 0.35]) {
-      const p = toCam(x + o, 0.45, c.z);
-      if (p[2] > NEAR) { const s = toScreen(p); wireDot(s[0], s[1], clamp(40 / p[2], 1.5, 7), Math.min(1, b * 1.3)); }
-    }
-    wireBlue = false;
+    if (b <= 0.04) continue;
+    defer(Math.hypot(x - view.x, c.z - travel), () => {
+      const z0 = c.z - 0.9, z1 = c.z + 0.9, y0 = 0.05, y1 = 0.55, hw = 0.4;
+      hexa([[x - hw, y0, z0], [x + hw, y0, z0], [x + hw, y0, z1], [x - hw, y0, z1], [x - hw, y1, z0], [x + hw, y1, z0], [x + hw, y1, z1], [x - hw, y1, z1]], b * 0.8);
+      const dir = Math.sign(c.v), front = c.v > 0 ? z1 : z0, back = c.v > 0 ? z0 : z1;
+      for (const o of [-0.25, 0.25]) { lightDot(x + o, 0.3, back - dir * 0.03, b > 0.3 ? 170 : 85); lightDot(x + o, 0.3, front + dir * 0.03, b > 0.3 ? 255 : 85); }
+    });
   }
 }
 
@@ -2354,179 +2404,169 @@ function drawPoles(now) {
       const lean = bend * 1.8 * (0.7 + 0.3 * hash1(k * 3 + x));
       return [x + (dx / dl) * lean, POLE_H - bend * 0.3, z + (dz / dl) * lean];
     };
-    let T = top(k0);
     for (let k = k0; k <= k1; k++) {
-      const z = k * POLE_GAP, b = fadeAt(x, z), T2 = top(k + 1);
-      const NS = Math.hypot(x - view.x, z - travel) < 24 ? 6 : 3;     // far spans: fewer wire segments
-      if (b > 0.02) {
-        const mx = lerp(x, T[0], 0.3), mz = lerp(z, T[2], 0.3);
-        seg3(x, 0, z, mx, POLE_H * 0.5, mz, b); seg3(mx, POLE_H * 0.5, mz, T[0], T[1], T[2], b);   // the pole, bending
-        const ay = T[1] - 0.15;
-        seg3(T[0] - ARM, ay, T[2], T[0] + ARM, ay, T[2], b);                                         // crossarm
-        for (const wo of [-ARM * 0.85, 0, ARM * 0.85]) {
-          const ax = T[0] + wo, az = T[2], bx = T2[0] + wo, by = T2[1] - 0.15, bz = T2[2];
-          if (snap > 0 && hash1(k * 7.3 + x * 3.1 + wo * 11) < snap * 0.6) {
-            for (const [ox, oy, oz, dir] of [[ax, ay, az, 1], [bx, by, bz, -1]]) {     // snapped: both ends hang and whip
-              let px = ox, py = oy, pz = oz;
-              for (let i = 1; i <= 4; i++) {
-                const u = i / 4, whip = Math.sin(t * 9 + k * 1.7 + i + dir) * 0.7 * u;
-                const qx = ox + whip, qy = oy - u * 2.2, qz = oz + dir * u * POLE_GAP * 0.18;
-                seg3(px, py, pz, qx, qy, qz, b); px = qx; py = qy; pz = qz;
-              }
-            }
-          } else {                                                                      // a catenary, swaying when strange
-            let px = ax, py = ay, pz = az;
-            const sway = 1 + w * 0.8 * Math.sin(t * 3 + k + wo * 5);
-            for (let i = 1; i <= NS; i++) {
-              const u = i / NS, sag = WIRE_SAG * 4 * u * (1 - u) * sway;
-              const qx = lerp(ax, bx, u), qy = lerp(ay, by, u) - sag, qz = lerp(az, bz, u);
-              seg3(px, py, pz, qx, qy, qz, b * 0.85); px = qx; py = qy; pz = qz;
-            }
-          }
+      const z = k * POLE_GAP, b = fadeAt(x, z);
+      if (b <= 0.04) continue;
+      const d = Math.hypot(x - view.x, z - travel);
+      defer(d, () => drawPole(x, z, k, top(k), top(k + 1), b, d, w, t, snap));
+    }
+  }
+}
+function drawPole(x, z, k, T, T2, b, d, w, t, snap) {
+  const mx = lerp(x, T[0], 0.3), mz = lerp(z, T[2], 0.3), my = POLE_H * 0.5, ay = T[1] - 0.15;
+  if (d < 24) {                                                       // near: boxy solid beams
+    beam([x, 0, z], [mx, my, mz], 0.08, b); beam([mx, my, mz], T, 0.07, b);
+    beam([T[0] - ARM, ay, T[2]], [T[0] + ARM, ay, T[2]], 0.05, b);
+  } else {                                                            // far: a pixel wide anyway
+    seg3(x, 0, z, mx, my, mz, b); seg3(mx, my, mz, T[0], T[1], T[2], b); seg3(T[0] - ARM, ay, T[2], T[0] + ARM, ay, T[2], b);
+  }
+  const NS = d < 24 ? 6 : 3;
+  for (const wo of [-ARM * 0.85, 0, ARM * 0.85]) {
+    const ax = T[0] + wo, az = T[2], bx = T2[0] + wo, by = T2[1] - 0.15, bz = T2[2];
+    if (snap > 0 && hash1(k * 7.3 + x * 3.1 + wo * 11) < snap * 0.6) {
+      for (const [ox, oy, oz, dir] of [[ax, ay, az, 1], [bx, by, bz, -1]]) {      // snapped: both ends hang and whip
+        let px = ox, py = oy, pz = oz;
+        for (let i = 1; i <= 4; i++) {
+          const u = i / 4, whip = Math.sin(t * 9 + k * 1.7 + i + dir) * 0.7 * u;
+          const qx = ox + whip, qy = oy - u * 2.2, qz = oz + dir * u * POLE_GAP * 0.18;
+          seg3(px, py, pz, qx, qy, qz, b); px = qx; py = qy; pz = qz;
         }
       }
-      T = T2;
+    } else {                                                                        // a catenary, swaying when strange
+      let px = ax, py = ay, pz = az;
+      const sway = 1 + w * 0.8 * Math.sin(t * 3 + k + wo * 5);
+      for (let i = 1; i <= NS; i++) {
+        const u = i / NS, sag = WIRE_SAG * 4 * u * (1 - u) * sway;
+        const qx = lerp(ax, bx, u), qy = lerp(ay, by, u) - sag, qz = lerp(az, bz, u);
+        seg3(px, py, pz, qx, qy, qz, b * 0.85); px = qx; py = qy; pz = qz;
+      }
     }
   }
 }
 
-// Overpasses: a deck across each road on pillars, every OVERPASS_GAP
+// Overpasses: a solid deck across each road on pillars, every OVERPASS_GAP
 function drawOverpasses() {
   const m0 = Math.ceil((travel - VIEW_FAR * 0.3 - OVERPASS_AT) / OVERPASS_GAP), m1 = Math.floor((travel + VIEW_FAR - OVERPASS_AT) / OVERPASS_GAP);
   for (const rx of roadsNear()) for (let m = m0; m <= m1; m++) {
     const z = OVERPASS_AT + m * OVERPASS_GAP, b = fadeAt(rx, z) * 0.9;
-    if (b <= 0.02) continue;
-    const y = 2.6, half = 14, th = 0.45, dz = 1.2;
-    for (const zz of [z - dz, z + dz]) {
-      seg3(rx - half, y, zz, rx + half, y, zz, b); seg3(rx - half, y + th, zz, rx + half, y + th, zz, b);   // deck
-      seg3(rx - half, y + th + 0.5, zz, rx + half, y + th + 0.5, zz, b * 0.6);                              // railing
-    }
-    for (const px of [-HWY_HALF - 1, HWY_HALF + 1, -10, 10]) {
-      seg3(rx + px, 0, z - dz, rx + px, y, z - dz, b); seg3(rx + px, 0, z + dz, rx + px, y, z + dz, b);     // pillars
-    }
+    if (b <= 0.04) continue;
+    defer(Math.hypot(rx - view.x, z - travel), () => {
+      const y = 2.6, half = 14, th = 0.45, dz = 1.2;
+      for (const px of [-HWY_HALF - 1, HWY_HALF + 1, -10, 10]) beam([rx + px, 0, z], [rx + px, y, z], 0.3, b);
+      hexa([[rx - half, y, z - dz], [rx + half, y, z - dz], [rx + half, y, z + dz], [rx - half, y, z + dz],
+            [rx - half, y + th, z - dz], [rx + half, y + th, z - dz], [rx + half, y + th, z + dz], [rx - half, y + th, z + dz]], b);
+      for (const zz of [z - dz, z + dz]) seg3(rx - half, y + th + 0.5, zz, rx + half, y + th + 0.5, zz, b * 0.6);   // railing
+    });
   }
 }
 
-// Queue a sign's lettering: the top-left, top-right and bottom-left corners of its face (world)
-function queueSign(tl, tr, bl, lines, blue, seed, b) {
-  const a = toCam(...tl), c = toCam(...tr), d = toCam(...bl);
-  if (a[2] < NEAR * 4 || c[2] < NEAR * 4 || d[2] < NEAR * 4) return;
-  const p0 = toScreen(a), p1 = toScreen(c), p3 = toScreen(d);
-  if (Math.hypot(p1[0] - p0[0], p1[1] - p0[1]) < 30) return;          // too small to read
-  if (signText.length < 12) signText.push({ pts: [p0, p1, p3], lines, blue, seed, b });
-}
-
-// Billboards: frame, legs, catwalk. Strange: they rise on impossible legs to meet you, and the ads turn to you.
-function drawBillboards() {
-  const w = weirdNow(), rise = Math.pow(w, 1.5);
-  let nearest = Infinity;
-  for (const bb of billboards) {
-    respawn(bb, spawnBillboard, -1, 45);
-    const d = distOf(bb), b = sceneryB(d);
-    if (b <= 0.02) continue;
-    bb.reroll -= dtWorld;
-    if (bb.reroll <= 0) { bb.reroll = 3 + Math.random() * 5; if (Math.random() < 0.15 + w) pickAd(bb); }
-    const L = bb.leg + rise * Math.max(0, view.h - bb.h * 0.6 - bb.leg) * (0.75 + 0.25 * hash1(bb.seed));
-    const ax = bb.ax, az = bb.az;
-    const corner = (u, v) => [bb.x + ax * u, L + v, bb.z + az * u];
-    const c = [corner(0, bb.h), corner(bb.w, bb.h), corner(bb.w, 0), corner(0, 0)];
-    nearest = Math.min(nearest, Math.hypot(d, L + bb.h / 2 - view.h));
-    wireBlue = bb.blue;
-    for (let i = 0; i < 4; i++) seg3(...c[i], ...c[(i + 1) % 4], b);
-    for (const u of [bb.w * 0.25, bb.w * 0.75]) { const p = corner(u, 0); seg3(p[0], 0, p[2], p[0], L, p[2], b * 0.8); }   // legs
-    seg3(...corner(-0.2, -0.25), ...corner(bb.w + 0.2, -0.25), b * 0.6);                                                    // catwalk
-    for (const u of [0.15, 0.5, 0.85]) seg3(...corner(bb.w * u, -0.25), ...corner(bb.w * u - 0.25, -0.6), b * 0.6);         // lamps
-    wireBlue = false;
-    queueSign(c[0], c[1], c[3], bb.ad, bb.blue, bb.seed, b);
-  }
-  for (const m of motels) nearest = Math.min(nearest, Math.hypot(distOf(m), m.h - view.h));
-  neonNear = clamp(1 - nearest / 14, 0, 1);
-}
-
-function drawMotels() {
-  for (const m of motels) {
-    respawn(m, spawnMotel, -1, 45);
-    const b = sceneryB(distOf(m));
-    if (b <= 0.02) continue;
-    const P = (u, y) => [m.x + m.ax * u, y, m.z + m.az * u];
-    const sw = 2.6, y0 = m.h - 1.1;
-    seg3(...P(0, 0), ...P(0, y0), b);                                     // the pole
-    wireBlue = true;
-    const box = [P(-sw / 2, m.h), P(sw / 2, m.h), P(sw / 2, y0), P(-sw / 2, y0)];
-    for (let i = 0; i < 4; i++) seg3(...box[i], ...box[(i + 1) % 4], b);
-    const ar = [P(sw / 2 + 0.2, y0 - 0.1), P(sw / 2 + 0.9, y0 - 0.45), P(sw / 2 + 0.2, y0 - 0.8)];   // the arrow
-    seg3(...ar[0], ...ar[1], b); seg3(...ar[1], ...ar[2], b);
-    wireBlue = false;
-    queueSign(box[0], box[1], box[3], ["MOTEL", m.vacancy ? "VACANCY" : "NO VACANCY"], true, m.seed, b);
-  }
-}
-
-function drawGas() {
-  for (const g of gasStations) {
-    respawn(g, spawnGas, -1, 45);
-    const b = sceneryB(distOf(g));
-    if (b <= 0.02) continue;
-    const ax = g.ax, az = g.az, fx = -az, fz = ax;                 // across, and away along the heading
-    const P = (u, y, v) => [g.x + ax * u + fx * v, y, g.z + az * u + fz * v];
-    const c = [P(0, g.h, 0), P(g.w, g.h, 0), P(g.w, g.h, g.d), P(0, g.h, g.d)];
-    const top = c.map(p => [p[0], p[1] + 0.9, p[2]]);               // the tall fascia
-    for (let i = 0; i < 4; i++) { seg3(...c[i], ...c[(i + 1) % 4], b); seg3(...top[i], ...top[(i + 1) % 4], b * 0.7); seg3(...c[i], ...top[i], b * 0.7); }
-    for (const [u, v] of [[0.4, 0.4], [g.w - 0.4, 0.4], [0.4, g.d - 0.4], [g.w - 0.4, g.d - 0.4]]) seg3(...P(u, 0, v), ...P(u, g.h, v), b * 0.8);
-    wireBlue = true;
-    for (const u of [g.w * 0.33, g.w * 0.66]) {                    // pumps
-      const a = P(u - 0.2, 0, g.d / 2), q = P(u + 0.2, 0, g.d / 2);
-      seg3(a[0], 0, a[2], a[0], 1.1, a[2], b * 0.7); seg3(q[0], 0, q[2], q[0], 1.1, q[2], b * 0.7); seg3(a[0], 1.1, a[2], q[0], 1.1, q[2], b * 0.7);
-    }
-    wireBlue = false;
-    queueSign(top[0], top[1], c[0], ["GAS · 24 HRS", "feelings extra."], false, g.seed, b);
-  }
-}
-
-// The lettering, after the wires: the site's bold italic serif with its hard black outline, mapped onto
-// each face. Neon buzz: a sign cuts out for a beat now and then. Strange: letters turn Greek.
-// Near the top: the ads melt, letters sliding down and stretching.
-function drawSigns(now) {
-  if (!signText.length) return;
-  const BWv = 400, BHv = 168, w = weirdNow();
-  const melt = clamp((viewAlt - MELT_ADS) / (1 - MELT_ADS), 0, 1);
-  ctx.save();
-  ctx.textAlign = "center"; ctx.textBaseline = "middle"; ctx.lineJoin = "round";
-  for (const s of signText) {
-    if (hash1(s.seed + Math.floor(now / 70)) < 0.04 + 0.12 * w) continue;     // neon buzz: off for a beat
-    const [p0, p1, p3] = s.pts;
-    ctx.setTransform((p1[0] - p0[0]) / BWv, (p1[1] - p0[1]) / BWv, (p3[0] - p0[0]) / BHv, (p3[1] - p0[1]) / BHv, p0[0], p0[1]);
-    ctx.globalAlpha = clamp(s.b * 1.3, 0, 1) * (0.85 + 0.15 * Math.random());
-    signLine(s.lines[0], BWv / 2, 66, 54, s.blue ? BLUE : RED, melt, s.seed, w, now);
-    signLine(s.lines[1], BWv / 2, 126, 28, s.blue ? RED : BLUE, melt, s.seed + 9, w, now);
-  }
-  ctx.restore();
-  signText = [];
-}
-function signLine(str, cx, cy, size, col, melt, seed, w, now) {
+// A sign's lettering in the panel font, laid onto its face (top-left, top-right, bottom-left corners).
+// Neon buzz: it cuts out for a beat now and then. Strange: letters turn Greek. Near the top: the
+// ads melt, letters sliding down off the board and stretching. Too far to read: a scribble line.
+function signGlitch(str, seed, w, now) {
   let txt = str;
   if (w > 0) {
     const tick = Math.floor(now / 140);
     txt = [...txt].map((ch, i) => (ch !== " " && hash1(seed + i * 13 + tick) < w * 0.14 ? GREEK[(i * 7 + tick) % GREEK.length] : ch)).join("");
   }
-  txt = glitchText(txt);
-  ctx.font = `italic 700 ${size}px ${SF}`;
-  let width = ctx.measureText(txt).width;
-  if (width > 380) { size = Math.floor(size * 380 / width); ctx.font = `italic 700 ${size}px ${SF}`; width = ctx.measureText(txt).width; }
-  ctx.lineWidth = Math.max(3, size * 0.16); ctx.strokeStyle = "#000"; ctx.fillStyle = col;
-  if (melt <= 0) { ctx.strokeText(txt, cx, cy); ctx.fillText(txt, cx, cy); return; }
-  // melting: letter by letter, each sliding down and stretching at its own pace
-  const chars = [...txt], a0 = ctx.globalAlpha;
-  let x = cx - width / 2;
-  for (let i = 0; i < chars.length; i++) {
-    const cw = ctx.measureText(chars[i]).width, k = hash1(seed + i * 3.7);
-    const drop = melt * melt * (40 + 200 * k) * (0.7 + 0.3 * Math.sin(now / 900 + i));
-    ctx.save();
-    ctx.globalAlpha = a0 * (1 - melt * 0.6 * k);
-    ctx.translate(x + cw / 2, cy + drop);
-    ctx.scale(1, 1 + melt * 1.8 * k);
-    ctx.strokeText(chars[i], 0, 0); ctx.fillText(chars[i], 0, 0);
-    ctx.restore();
-    x += cw;
+  return glitchText(txt);
+}
+function signPix(tl, tr, bl, lines, b, seed, now) {
+  const a = toCam(tl[0], tl[1], tl[2]), c = toCam(tr[0], tr[1], tr[2]), d = toCam(bl[0], bl[1], bl[2]);
+  if (a[2] < NEAR * 4 || c[2] < NEAR * 4 || d[2] < NEAR * 4) return;
+  const w = weirdNow();
+  if (hash1(seed + Math.floor(now / 70)) < 0.04 + 0.12 * w) return;
+  const p0 = toScreen(a), p1 = toScreen(c), p3 = toScreen(d);
+  const ox = p0[0] * FBS, oy = p0[1] * FBS, ux = (p1[0] - p0[0]) * FBS, uy = (p1[1] - p0[1]) * FBS, vx = (p3[0] - p0[0]) * FBS, vy = (p3[1] - p0[1]) * FBS;
+  const fw = Math.hypot(ux, uy), fh = Math.hypot(vx, vy);
+  if (fw < 12 || fh < 4) return;
+  const melt = clamp((viewAlt - MELT_ADS) / (1 - MELT_ADS), 0, 1);
+  const at = (fu, fv) => [ox + ux * fu + vx * fv, oy + uy * fu + vy * fv];
+  [[lines[0], 0.12, 0.4, lvOf(b * 1.3)], [lines[1], 0.62, 0.24, lvOf(b * 0.9)]].forEach(([str, top, maxH, v], ri) => {
+    if (!v) return;
+    const chars = [...signGlitch(str, seed + ri * 9, w, now)], cols = chars.length * 6 - 1;
+    let gu = 0.92 / cols, gv = (gu * fw) / fh;                     // square pixels on screen
+    if (gv * 7 > maxH) { gv = maxH / 7; gu = (gv * fh) / fw; }
+    const x0 = (1 - gu * cols) / 2;
+    if (gu * fw < 0.7) { const A = at(x0, top + gv * 3.5), B = at(1 - x0, top + gv * 3.5); pxLine(A[0], A[1], B[0], B[1], 85); return; }
+    const pw = Math.max(1, Math.round(gu * fw)), ph = Math.max(1, Math.round(gv * fh));
+    chars.forEach((ch, k) => {
+      if (ch === " ") return;
+      const g = glyph(ch), kk = hash1(seed + k * 3.7);
+      const drop = melt * melt * (0.25 + 1.4 * kk) * (0.7 + 0.3 * Math.sin(now / 900 + k)), stretch = 1 + melt * 1.8 * kk;
+      for (let r = 0; r < 7; r++) {
+        const bits = g[r];
+        if (!bits) continue;
+        for (let cc = 0; cc < 5; cc++) if (bits & (16 >> cc)) {
+          const P = at(x0 + (k * 6 + cc) * gu, top + r * gv * stretch + drop);
+          pxRect(P[0], P[1], pw, Math.max(1, Math.round(ph * stretch)), v);
+        }
+      }
+    });
+  });
+}
+
+// Billboards: a flat black board on two legs, a catwalk, the ad. Strange: they rise on impossible legs
+// to meet you, and the ads turn to you.
+function drawBillboards(now) {
+  const w = weirdNow(), rise = Math.pow(w, 1.5);
+  let nearest = Infinity;
+  for (const bb of billboards) {
+    respawn(bb, spawnBillboard, -1, 45);
+    const d = distOf(bb), b = sceneryB(d);
+    if (b <= 0.04) continue;
+    bb.reroll -= dtWorld;
+    if (bb.reroll <= 0) { bb.reroll = 3 + Math.random() * 5; if (Math.random() < 0.15 + w) pickAd(bb); }
+    const L = bb.leg + rise * Math.max(0, view.h - bb.h * 0.6 - bb.leg) * (0.75 + 0.25 * hash1(bb.seed));
+    nearest = Math.min(nearest, Math.hypot(d, L + bb.h / 2 - view.h));
+    defer(d, () => {
+      const ax = bb.ax, az = bb.az, corner = (u, v) => [bb.x + ax * u, L + v, bb.z + az * u];
+      for (const u of [bb.w * 0.25, bb.w * 0.75]) { const p = corner(u, 0); beam([p[0], 0, p[2]], [p[0], L, p[2]], 0.08, b * 0.8); }
+      const c = [corner(0, bb.h), corner(bb.w, bb.h), corner(bb.w, 0), corner(0, 0)];
+      face(c.map(p => toCam(p[0], p[1], p[2])), lvOf(b));
+      seg3(...corner(-0.2, -0.25), ...corner(bb.w + 0.2, -0.25), b * 0.6);
+      signPix(c[0], c[1], c[3], bb.ad, b, bb.seed, now);
+    });
+  }
+  for (const m of motels) nearest = Math.min(nearest, Math.hypot(distOf(m), m.h - view.h));
+  neonNear = clamp(1 - nearest / 14, 0, 1);
+}
+
+function drawMotels(now) {
+  for (const m of motels) {
+    respawn(m, spawnMotel, -1, 45);
+    const d = distOf(m), b = sceneryB(d);
+    if (b <= 0.04) continue;
+    defer(d, () => {
+      const P = (u, y) => [m.x + m.ax * u, y, m.z + m.az * u];
+      const sw = 2.6, y0 = m.h - 1.1;
+      beam(P(0, 0), P(0, y0), 0.09, b);
+      const box = [P(-sw / 2, m.h), P(sw / 2, m.h), P(sw / 2, y0), P(-sw / 2, y0)];
+      face(box.map(p => toCam(p[0], p[1], p[2])), lvOf(b));
+      const ar = [P(sw / 2 + 0.2, y0 - 0.1), P(sw / 2 + 0.9, y0 - 0.45), P(sw / 2 + 0.2, y0 - 0.8)];
+      seg3(...ar[0], ...ar[1], b); seg3(...ar[1], ...ar[2], b);
+      signPix(box[0], box[1], box[3], ["MOTEL", m.vacancy ? "VACANCY" : "NO VACANCY"], b, m.seed, now);
+    });
+  }
+}
+
+function drawGas(now) {
+  for (const g of gasStations) {
+    respawn(g, spawnGas, -1, 45);
+    const d = distOf(g), b = sceneryB(d);
+    if (b <= 0.04) continue;
+    defer(d, () => {
+      const ax = g.ax, az = g.az, fx = -az, fz = ax;
+      const P = (u, y, v) => [g.x + ax * u + fx * v, y, g.z + az * u + fz * v];
+      for (const [u, v] of [[0.4, 0.4], [g.w - 0.4, 0.4], [0.4, g.d - 0.4], [g.w - 0.4, g.d - 0.4]]) beam(P(u, 0, v), P(u, g.h, v), 0.1, b);
+      for (const u of [g.w * 0.33, g.w * 0.66]) {                  // pumps
+        const q = [P(u - 0.25, 0, g.d / 2 - 0.2), P(u + 0.25, 0, g.d / 2 - 0.2), P(u + 0.25, 0, g.d / 2 + 0.2), P(u - 0.25, 0, g.d / 2 + 0.2)];
+        hexa([...q, ...q.map(p => [p[0], 1.1, p[2]])], b * 0.8);
+      }
+      const c = [P(0, g.h, 0), P(g.w, g.h, 0), P(g.w, g.h, g.d), P(0, g.h, g.d)], top = c.map(p => [p[0], p[1] + 0.9, p[2]]);
+      hexa([...c, ...top], b);                                      // the canopy with its tall fascia
+      signPix(top[0], top[1], c[0], ["GAS · 24 HRS", "feelings extra."], b, g.seed, now);
+    });
   }
 }
 
@@ -2536,7 +2576,7 @@ function updateDrips(dt, s) {
   if ((mode === "live" || mode === "melt") && s.r > 4 && m > 0.05) {
     const n = Math.min(4, Math.floor(m * m * 45 * dt + Math.random()));
     for (let i = 0; i < n && sunDrips.length < DRIP_CAP; i++) {
-      const a = (0.12 + 0.76 * Math.random()) * Math.PI;           // somewhere on the lower rim
+      const a = (0.12 + 0.76 * Math.random()) * Math.PI;
       const sag = m * 0.55 * Math.pow(Math.max(0, Math.sin(a) + 0.25), 2);
       sunDrips.push({ x: s.x + Math.cos(a) * s.r * (1 + m * 0.12), y: s.y + Math.sin(a) * s.r * (1 + sag),
                       vx: (Math.random() - 0.5) * 30, vy: 20 + Math.random() * 80, size: 1.5 + Math.random() * 2.5 * (1 + m) });
@@ -2544,7 +2584,6 @@ function updateDrips(dt, s) {
   }
   const g = 500 + 900 * m;
   sunDrips = sunDrips.filter(d => { d.vy += g * dt; d.x += d.vx * dt; d.y += d.vy * dt; d.size *= 1 + 0.25 * dt; return d.y < H + 100; });
-  // The wings' wax: drops running in from the edges of the frame, with the hands' burning
   const hot = Math.max(heat, burnAmt);
   if ((mode === "live" || mode === "melt") && hot > 0.1 && edgeDrips.length < EDGE_CAP && Math.random() < hot * hot * 14 * dt) {
     const left = Math.random() < 0.5;
@@ -2554,257 +2593,341 @@ function updateDrips(dt, s) {
   edgeDrips = edgeDrips.filter(d => { d.vy += 480 * dt; d.y += d.vy * dt; return d.y < H + 80; });
 }
 function drawDrips() {
-  if (!sunDrips.length && !edgeDrips.length) return;
-  ctx.save();
-  ctx.lineCap = "round";
-  if (sunDrips.length) {
-    const p = new Path2D();
-    for (const d of sunDrips) { const len = clamp(d.vy * 0.05, 4, 90) * (1 + d.size * 0.15); p.moveTo(d.x - d.vx * 0.03, d.y - len); p.lineTo(d.x, d.y); }
-    ctx.globalAlpha = 0.28; ctx.strokeStyle = RED; ctx.lineWidth = 8; ctx.stroke(p);           // glow
-    ctx.globalAlpha = 0.95; ctx.strokeStyle = "rgb(255, 160, 70)"; ctx.lineWidth = 2.4; ctx.stroke(p);   // hot core
+  for (const d of sunDrips) {
+    const len = clamp(d.vy * 0.05, 4, 90) * (1 + d.size * 0.15), x = d.x * FBS, y = d.y * FBS;
+    pxLine((d.x - d.vx * 0.03) * FBS, (d.y - len) * FBS, x, y, 170);
+    pxRect(x - 1, y - 1, 2, 2, 255);
   }
-  ctx.globalAlpha = 0.9;
-  for (const d of edgeDrips) {
-    const len = clamp(d.vy * 0.06, 6, 70);
-    ctx.strokeStyle = d.c; ctx.lineWidth = d.size;
-    ctx.beginPath(); ctx.moveTo(d.x, d.y - len); ctx.lineTo(d.x, d.y); ctx.stroke();
+  for (const d of edgeDrips) {                       // the wings' wax, running in from the frame edges
+    const len = clamp(d.vy * 0.06, 6, 70), x = d.x * FBS, y = d.y * FBS, w = d.size > 4 ? 2 : 1;
+    pxRect(x, (d.y - len) * FBS, w, len * FBS, d.c === 255 ? 170 : 85);
+    pxRect(x, y - 1, w, 2, 255);
   }
-  ctx.restore();
 }
 
-// ============================================================
-// THE ORACLE: a digital magic 8-ball rising out of dark water
-// ============================================================
-const ICO = (() => {
-  const p = (1 + Math.sqrt(5)) / 2;
-  const v = [[-1, p, 0], [1, p, 0], [-1, -p, 0], [1, -p, 0], [0, -1, p], [0, 1, p], [0, -1, -p], [0, 1, -p], [p, 0, -1], [p, 0, 1], [-p, 0, -1], [-p, 0, 1]]
-    .map(a => { const l = Math.hypot(...a); return a.map(c => c / l); });
-  const e = [];
-  for (let i = 0; i < 12; i++) for (let j = i + 1; j < 12; j++) if (Math.hypot(v[i][0] - v[j][0], v[i][1] - v[j][1], v[i][2] - v[j][2]) < 1.1) e.push([i, j]);
-  return { v, e };   // 12 vertices, 30 edges
-})();
-
-function wrapText(txt, maxW) {
-  const lines = [];
-  let cur = "";
-  for (const wd of txt.split(" ")) {
-    const t = cur ? cur + " " + wd : wd;
-    if (cur && ctx.measureText(t).width > maxW) { lines.push(cur); cur = wd; } else cur = t;
-  }
-  if (cur) lines.push(cur);
-  return lines;
-}
-
-function drawOracle(now) {
-  const o = oracle, t = (now - o.start) / 1000;
-  ctx.fillStyle = "#000"; ctx.fillRect(0, 0, W, H);
-  if (t < ORACLE_DARK) return;                               // black, and quiet
-  const u = smooth01(clamp((t - ORACLE_DARK) / ORACLE_RISE, 0, 1));
-  const R = Math.min(W, H) * 0.3, waterY = H * 0.74;
-  const cx = W / 2, cy = lerp(H + R * 1.3, H * 0.4, u) + (u >= 1 ? Math.sin(t * 0.9) * R * 0.02 : 0);
-  ctx.save();
-  // the ball: a dark blue liquid window, specks drifting in it
-  const g = ctx.createRadialGradient(cx, cy - R * 0.25, R * 0.1, cx, cy, R);
-  g.addColorStop(0, "rgb(16, 16, 96)"); g.addColorStop(1, "#000");
-  ctx.fillStyle = g; ctx.beginPath(); ctx.arc(cx, cy, R, 0, Math.PI * 2); ctx.fill();
-  ctx.globalAlpha = 0.7; ctx.strokeStyle = BLUE; ctx.lineWidth = 2; ctx.stroke();
-  ctx.save();
-  ctx.beginPath(); ctx.arc(cx, cy, R - 2, 0, Math.PI * 2); ctx.clip();
-  ctx.fillStyle = BLUE;
-  for (let i = 0; i < 40; i++) {
-    const px = cx + (hash1(i) - 0.5) * 2 * R + Math.sin(t * 0.3 + i) * 10;
-    const py = cy - R + ((hash1(i + 50) * 2 * R + t * 8 * (0.5 + hash1(i + 90))) % (2 * R));
-    ctx.globalAlpha = 0.25 + 0.2 * Math.sin(t + i); ctx.fillRect(px, py, 2, 2);
-  }
-  // the icosahedron, turning slowly, glowing
-  const rs = R * 0.7, ay = t * 0.35, ax = 0.45 + Math.sin(t * 0.21) * 0.25;
-  const cyA = Math.cos(ay), syA = Math.sin(ay), cxA = Math.cos(ax), sxA = Math.sin(ax);
-  const P = ICO.v.map(([x, y, z]) => {
-    const x1 = x * cyA + z * syA, z1 = -x * syA + z * cyA;
-    const y1 = y * cxA - z1 * sxA, z2 = y * sxA + z1 * cxA;
-    const k = 3 / (3 + z2);
-    return [cx + x1 * rs * k, cy + y1 * rs * k, z2];
-  });
-  ctx.lineWidth = 2; ctx.strokeStyle = BLUE; ctx.shadowColor = BLUE; ctx.shadowBlur = 18;
-  for (const back of [true, false]) {
-    ctx.globalAlpha = back ? 0.25 : 0.95;
-    ctx.beginPath();
-    for (const [i, j] of ICO.e) if ((P[i][2] + P[j][2] > 0) === back) { ctx.moveTo(P[i][0], P[i][1]); ctx.lineTo(P[j][0], P[j][1]); }
-    ctx.stroke();
-  }
-  ctx.shadowBlur = 0;
-  // the window: the triangle facing you, where the answer floats up
-  const tr = R * 0.66;
-  ctx.globalAlpha = 0.9; ctx.fillStyle = "rgb(8, 8, 48)"; ctx.strokeStyle = BLUE; ctx.lineWidth = 2;
-  ctx.beginPath();
-  for (let i = 0; i < 3; i++) { const a = Math.PI / 2 + (i * Math.PI * 2) / 3; ctx[i ? "lineTo" : "moveTo"](cx + Math.cos(a) * tr, cy - tr * 0.2 + Math.sin(a) * tr); }
-  ctx.closePath(); ctx.fill(); ctx.stroke();
-  ctx.restore();   // (the ball's clip)
-  // the water, over the ball's lower part: slow blue swell lines
-  ctx.globalAlpha = 1; ctx.fillStyle = "#000"; ctx.fillRect(0, waterY, W, H - waterY);
-  ctx.strokeStyle = BLUE; ctx.lineWidth = 1.5;
-  for (let k = 0; k < 7; k++) {
-    const y = waterY + k * k * 7;
-    ctx.globalAlpha = 0.45 * (1 - k / 7) * clamp(t - ORACLE_DARK, 0, 1);
-    ctx.beginPath();
-    for (let x = 0; x <= W; x += 16) { const yy = y + Math.sin(x * 0.01 + t * 0.8 + k) * (3 + k); x ? ctx.lineTo(x, yy) : ctx.moveTo(x, yy); }
-    ctx.stroke();
-  }
-  // the truth, letter by letter, glitching in: the site's type with its hard outline
-  const T0 = ORACLE_DARK + ORACLE_RISE;
-  if (t >= T0) {
-    const text = o.truth.text, n = Math.min(text.length, Math.floor(((t - T0) * 1000) / LETTER_MS));
-    let shown = [...text.slice(0, n)].map(c => (c !== " " && Math.random() < 0.025 ? GREEK[(Math.random() * GREEK.length) | 0] : c)).join("");
-    if (n < text.length) shown += GREEK[(Math.random() * GREEK.length) | 0];        // the next letter, still static
-    const fs = Math.round(R * 0.12);
-    ctx.font = `italic 700 ${fs}px ${SF}`; ctx.textAlign = "center"; ctx.textBaseline = "middle"; ctx.lineJoin = "round";
-    const lines = wrapText(shown, tr * 1.05);
-    ctx.globalAlpha = 1;
-    lines.forEach((ln, i) => {
-      const y = cy - tr * 0.42 + (i - (lines.length - 1) / 2) * fs * 1.1;
-      ctx.lineWidth = Math.max(4, fs * 0.18); ctx.strokeStyle = "#000"; ctx.strokeText(ln, cx, y);
-      ctx.fillStyle = RED; ctx.fillText(ln, cx, y);
-    });
-    // tiny text under it (on the canvas, so it's in the clip too)
-    ctx.font = `16px "Courier New", Courier, monospace`;
-    ctx.fillStyle = BLUE; ctx.globalAlpha = clamp((t - T0) / 1.5, 0, 1);
-    const count = o.final ? `ALL ${o.total} LEARNED · THE CYCLE BEGINS AGAIN`
-      : `TRUTH ${String(o.learned).padStart(2, "0")} OF ${o.total} LEARNED`;
-    ctx.fillText(count, cx, waterY + 26);
-    if (o.hint) { ctx.fillStyle = RED; ctx.fillText(o.hint, cx, waterY + 48); }
-    ctx.fillStyle = "rgb(170, 0, 0)"; ctx.font = `12px "Courier New", Courier, monospace`;
-    ctx.fillText("ICARUS · LIVE.AND.DIE", cx, 24);
-  }
-  ctx.restore();
-}
-
-// The Oracle's timeline: speak as the letters start; the buttons once it's complete; then end the clip
-function updateOracle(now) {
-  const o = oracle, t = (now - o.start) / 1000, T0 = ORACLE_DARK + ORACLE_RISE;
-  if (!o.spoken && t >= T0) { o.spoken = true; speakTruth(o.truth.text); }
-  const done = T0 + (o.truth.text.length * LETTER_MS) / 1000;
-  if (!o.shown && t >= done + 0.8) {
-    o.shown = true;
-    $("voiceBtn").textContent = voiceOn ? "VOICE: ON" : "VOICE: OFF";
-    $("results").classList.remove("hidden");
-  }
-  if (recorder && t >= done + CLIP_TAIL) stopRecording();
-}
-
-// The whole world, in one batched stroke pass, then scanlines
-function drawWorld(now, dt, sun) {
-  beginWire();
-  dtWorld = dt;
-  // During the long fall the land gives way to the sea once the nose is down
-  const fallT = mode === "melt" ? (now - meltStart) / 1000 : -1;
-  const land = fallT < FALL_UP * 0.8;
-  if (land) {
-    drawRidge();
-    drawGround();
-    drawHighway();
-    drawCars(dt);
-    drawPoles(now);
-    drawOverpasses();
-    drawBillboards();
-    drawMotels();
-    drawGas();
-    drawClouds();
-    drawSpeedLines();
-  } else { neonNear = 0; signText = []; }
-  if (fallT >= FALL_UP * 0.5) drawSea(now, clamp((fallT - FALL_UP * 0.5) / 0.6, 0, 1));
-  drawHorizon();
-  drawGhosts();
-  drawFather();
-  drawFigures();
-  drawSunWithLies(now, sun);
-  flushWire();
-  drawSigns(now);                     // the lettering, over its own sign frames
-  drawScanlines();
-}
-
-// ---------- Wax ----------
+// ---------- Wax off the fingertips; feathers ----------
 function spawnWax(dt) {
   const hot = Math.max(heat, burnAmt);
   if (hot < 0.04 || !handTips.length) return;
-  const rate = hot * hot * 6;             // drops per second, per fingertip
+  const rate = hot * hot * 6;
   for (const tip of handTips) {
     if (wax.length >= WAX_CAP) return;
     if (Math.random() < rate * dt) {
-      wax.push({
-        x: tip.x + (Math.random() - 0.5) * 4, y: tip.y,
-        vx: (Math.random() - 0.5) * 30, vy: 20 + Math.random() * 60,
-        size: 2 + Math.random() * 1.5 + heat, c: WAX_COLORS[(Math.random() * WAX_COLORS.length) | 0], life: 0,
-      });
+      wax.push({ x: tip.x + (Math.random() - 0.5) * 4, y: tip.y, vx: (Math.random() - 0.5) * 30, vy: 20 + Math.random() * 60,
+                 size: 2 + Math.random() * 1.5 + heat, c: WAX_COLORS[(Math.random() * WAX_COLORS.length) | 0], life: 0 });
     }
   }
 }
-
 function drawWax(dt) {
-  ctx.globalAlpha = 0.9;
   wax = wax.filter(p => {
     p.vy += 900 * dt; p.x += p.vx * dt; p.y += p.vy * dt; p.life += dt;
     if (p.y > H + 10 || p.life > 3) return false;
-    ctx.fillStyle = p.c;
-    ctx.fillRect(p.x - p.size / 2, p.y - p.size / 2, p.size, p.size);
+    const s = Math.max(1, Math.round(p.size * FBS));
+    pxRect(p.x * FBS - s / 2, p.y * FBS - s / 2, s, s, p.c);
     return true;
   });
-  ctx.globalAlpha = 1;
 }
-
-// ---------- Feathers ----------
 function drawFeathers(dt) {
-  ctx.fillStyle = "#fff";
   feathers = feathers.filter(p => {
     p.life += dt;
     if (p.life > p.max) return false;
     p.vy += 60 * dt; p.vx *= 1 - 1.5 * dt; p.vy *= 1 - 1.5 * dt;
     p.x += p.vx * dt + Math.sin(p.life * 4 + p.ph) * 25 * dt;
     p.y += p.vy * dt;
-    ctx.globalAlpha = 0.85 * (1 - p.life / p.max);
-    ctx.fillRect(p.x - p.size / 2, p.y - p.size / 2, p.size, p.size);
+    const v = lvOf(0.9 * (1 - p.life / p.max));
+    if (v) pxRect(p.x * FBS, p.y * FBS, 1, 1, v);
     return true;
   });
-  ctx.globalAlpha = 1;
 }
 
-function render(now, dt) {
-  // Renderer failing: sometimes it just doesn't draw a new frame (the world keeps moving)
-  if (stutterLeft > 0) { stutterLeft--; return; }
-  if (Math.random() < glitchAmt() * 0.05) stutterLeft = 1 + ((Math.random() * 3) | 0);
+// ---------- The whole world: flat things first, then the solids far to near ----------
+function drawWorld(now, dt, sun) {
+  dtWorld = dt;
+  const fallT = mode === "melt" ? (now - meltStart) / 1000 : -1;
+  const land = fallT < FALL_UP * 0.8;
+  drawHorizon();
+  drawSunWithLies(now, sun);
+  if (land) { drawRidge(); drawGround(); drawHighway(); }
+  if (fallT >= FALL_UP * 0.5) drawSea(now, clamp((fallT - FALL_UP * 0.5) / 0.6, 0, 1));
+  drawGhosts();
+  if (land) { drawCars(dt); drawPoles(now); drawOverpasses(); drawBillboards(now); drawMotels(now); drawGas(now); drawClouds(); }
+  else neonNear = 0;
+  drawFather();
+  drawFigures();
+  DL.sort((a, b) => b.d - a.d);
+  for (const it of DL) it.f();
+  DL = [];
+  if (land) drawSpeedLines();
+}
 
-  if (mode === "oracle" && oracle) { drawOracle(now); updateOracle(now); return; }
+// ---------- The HUD: a thin frame, ALT on the left, WAX on the right, a radar for the sun, SCORE ----------
+function hudBar(x, y, w, h, val, v, ticks) {
+  pxRect(x, y, w, h, 0); pxFrame(x, y, w, h, 85);
+  const hh = Math.round((h - 4) * clamp01(val));
+  if (hh > 0) pxRect(x + 2, y + h - 2 - hh, w - 4, hh, v);
+  for (const t of ticks) pxRect(x + w, y + h - 2 - Math.round((h - 4) * t), 2, 1, 170);
+}
+function drawHUD(now) {
+  const blink = ((now / 250) | 0) & 1;
+  pxFrame(0, 0, FB_W, FB_H, 170);
+  pxText("SCORE " + scoreOf(flight ? flight.maxAlt : 0), FB_W / 2, 4, 1, 255, "center", true);
+  pxText("ALT", 4, 4, 1, 170, "left", true);
+  hudBar(6, 14, 8, 200, viewAlt, 255, [SEA_LINE, SUN_LINE]);
+  // radar: you in the middle, the sun's bearing and distance
+  const rx = FB_W - 46, ry = 3, rw = 42, rh = 30;
+  pxRect(rx, ry, rw, rh, 0); pxFrame(rx, ry, rw, rh, 170);
+  pxRect(rx + 1, ry + rh / 2, rw - 2, 1, 85); pxRect(rx + rw / 2, ry + 1, 1, rh - 2, 85);
+  pxRect(rx + rw / 2 - 1, ry + rh / 2 - 1, 2, 2, 170);
+  const f = fwdOf(SUN_X, SUN_Z), l = latOf(SUN_X, SUN_Z), rel = Math.atan2(l, f), rr = clamp(Math.hypot(f, l) / 300, 0.15, 1);
+  const sx = rx + rw / 2 + Math.sin(rel) * rr * (rw / 2 - 4), sy = ry + rh / 2 - Math.cos(rel) * rr * (rh / 2 - 4);
+  if (!(heat > 0.5 && blink)) pxRect(sx - 1, sy - 1, 3, 3, 255);
+  const wax = mode === "melt" ? 1 : heat;
+  pxText("WAX", FB_W - 4, 37, 1, 170, "right", true);
+  hudBar(FB_W - 14, 47, 8, 167, wax, wax > 0.8 && blink ? 85 : 255, []);
+}
 
-  ctx.fillStyle = "#000";
-  ctx.fillRect(0, 0, W, H);
-  drawRain();                         // Greek rain, behind everything
+// ============================================================
+// THE ORACLE: a solid low-poly 8-ball rising out of dark water, turning in dithered red liquid
+// ============================================================
+function drawOracle(now) {
+  const o = oracle, t = (now - o.start) / 1000;
+  if (t < ORACLE_DARK) return;                                   // black, and quiet
+  const u = smooth01(clamp((t - ORACLE_DARK) / ORACLE_RISE, 0, 1));
+  const R = 64, waterY = 170, cx = FB_W / 2;
+  const cy = Math.round(lerp(FB_H + R * 1.3, 86, u) + (u >= 1 ? Math.sin(t * 0.9) * 1.5 : 0));
+  for (let y = Math.max(0, cy - R); y <= Math.min(FB_H - 1, cy + R); y++) {      // the liquid
+    const dy = y - cy, hw = Math.floor(Math.sqrt(Math.max(0, R * R - dy * dy))), row = y * FB_W;
+    for (let x = Math.max(0, cx - hw); x <= Math.min(FB_W - 1, cx + hw); x++) {
+      const dx = x - cx, d = Math.sqrt(dx * dx + dy * dy) / R;
+      const v = (1 - d) * 80 + Math.sin(dx * 0.11 + t * 1.1 + Math.sin(dy * 0.08 - t * 0.7) * 2.2) * 30 + 6;
+      fb[row + x] = v > 0 ? (v > 160 ? 160 : v | 0) : 0;
+    }
+  }
+  pxCircle(cx, cy, R, 170);
+  const rs = R * 0.72, ay = t * 0.35, ax = 0.45 + Math.sin(t * 0.21) * 0.25;   // the icosahedron
+  const cyA = Math.cos(ay), syA = Math.sin(ay), cxA = Math.cos(ax), sxA = Math.sin(ax);
+  const P = ICO_V.map(([x, y, z]) => {
+    const x1 = x * cyA + z * syA, z1 = -x * syA + z * cyA, y1 = y * cxA - z1 * sxA, z2 = y * sxA + z1 * cxA, k = 3 / (3 + z2);
+    return [cx + x1 * rs * k, cy + y1 * rs * k, z2];
+  });
+  const fr = [];
+  for (const f of ICO_F) { const z = P[f[0]][2] + P[f[1]][2] + P[f[2]][2]; if (z < 0.2) fr.push([z, f]); }
+  fr.sort((a, b) => b[0] - a[0]);
+  for (const [, f] of fr) { const p = [P[f[0]][0], P[f[0]][1], P[f[1]][0], P[f[1]][1], P[f[2]][0], P[f[2]][1]]; pxFill(p, 0); pxOutline(p, 255); }
+  pxRect(0, waterY, FB_W, FB_H - waterY, 0);                       // the water, over its lower part
+  for (let k = 0; k < 5; k++) {
+    const y = waterY + 1 + k * k * 3, v = k < 2 ? 170 : 85;
+    let px = 0, py = y;
+    for (let x = 8; x <= FB_W; x += 8) { const yy = y + Math.sin(x * 0.03 + t * 0.8 + k) * (1 + k * 0.5); pxLine(px, py, x, yy, v); px = x; py = yy; }
+  }
+  const T0 = ORACLE_DARK + ORACLE_RISE;
+  if (t >= T0) {                                                   // the truth, typed out letter by letter
+    const text = o.truth.text, n = Math.min(text.length, Math.floor(((t - T0) * 1000) / LETTER_MS));
+    let shown = [...text.slice(0, n)].map(c => (c !== " " && Math.random() < 0.025 ? GREEK[(Math.random() * GREEK.length) | 0] : c)).join("");
+    if (n < text.length) shown += GREEK[(Math.random() * GREEK.length) | 0];
+    const big = text.length <= 16, sc = big ? 2 : 1, lines = wrapChars(text, big ? 16 : 30);
+    const lw = Math.max(...lines.map(l => textW(l, sc))), lh = 9 * sc;
+    const bw = lw + 12, bh = lines.length * lh + 8, bx = Math.round(cx - bw / 2), by = Math.round(cy - bh / 2);
+    pxRect(bx, by, bw, bh, 0); pxFrame(bx, by, bw, bh, 170);
+    let off = 0;
+    lines.forEach((ln, i) => {
+      const seg = shown.slice(off, off + ln.length + (off + ln.length >= shown.length - 1 ? 1 : 0));
+      off += ln.length + 1;
+      pxText(seg, bx + 6 + (lw - textW(ln, sc)) / 2, by + 5 + i * lh, sc, 255);
+    });
+    const count = o.final ? `ALL ${o.total} LEARNED · THE CYCLE BEGINS AGAIN` : `TRUTH ${String(o.learned).padStart(2, "0")} OF ${o.total} LEARNED`;
+    pxText(count, cx, waterY + 12, 1, 170, "center", true);
+    if (o.hint) pxText(o.hint, cx, waterY + 22, 1, 255, "center", true);
+  }
+  if (o.shown) {
+    pxText(o.flew || "", FB_W / 2, 4, 1, 85, "center");
+    const items = [["FLY AGAIN", flyAgain], ["TRUTHS", showTruths], [voiceOn ? "VOICE: ON" : "VOICE: OFF", toggleVoice]];
+    if (lastClip) items.push(["SAVE CLIP", saveClip]);
+    menuRow(items, FB_H - 14);
+  } else pxText("ICARUS · LIVE.AND.DIE", 4, 4, 1, 85);
+}
+// The Oracle's timeline: speak as the letters start (a chip beep per letter); the menu once it's
+// complete; then end the clip
+function updateOracle(now) {
+  const o = oracle, t = (now - o.start) / 1000, T0 = ORACLE_DARK + ORACLE_RISE;
+  if (!o.spoken && t >= T0) { o.spoken = true; speakTruth(o.truth.text); }
+  const n = t >= T0 ? Math.min(o.truth.text.length, Math.floor(((t - T0) * 1000) / LETTER_MS)) : 0;
+  while ((o.typed || 0) < n) { o.typed = (o.typed || 0) + 1; if (o.truth.text[o.typed - 1] !== " ") letterBeep(o.typed); }
+  const done = T0 + (o.truth.text.length * LETTER_MS) / 1000;
+  if (!o.shown && t >= done + 0.8) o.shown = true;
+  if (recorder && t >= done + CLIP_TAIL) stopRecording();
+}
 
+// ============================================================
+// Menus and screens, all on the panel
+// ============================================================
+let menu = [], menuReg = true;        // this frame's tappable items (panel coordinates)
+function menuItem(label, x, y, act, sc = 1, v = 255) {
+  const pad = 2 * sc, w = textW(label, sc) + pad * 2 + 2, h = 7 * sc + pad * 2;
+  const x0 = Math.round(x - w / 2), y0 = Math.round(y);
+  pxRect(x0, y0, w, h, 0); pxFrame(x0, y0, w, h, 85);
+  pxText(label, x0 + pad + 1, y0 + pad, sc, v);
+  if (menuReg) menu.push({ x: x0, y: y0, w, h, act });
+  return w;
+}
+function menuRow(items, y, sc = 1) {
+  const gap = 8, ws = items.map(([l]) => textW(l, sc) + 4 * sc + 2);
+  let x = FB_W / 2 - (ws.reduce((a, b) => a + b, 0) + gap * (items.length - 1)) / 2;
+  items.forEach(([l, act], i) => { menuItem(l, x + ws[i] / 2, y, act, sc); x += ws[i] + gap; });
+}
+
+// The title: the site's outlined serif logo, rendered once and snapped to the panel's four reds
+let logoBits = null;
+function makeLogo() {
+  const c = document.createElement("canvas"), LH = 84;
+  c.width = FB_W; c.height = LH;
+  const g = c.getContext("2d");
+  g.font = `italic 700 66px ${SF}`; g.textAlign = "center"; g.lineJoin = "round";
+  g.fillStyle = "rgb(85, 0, 0)"; g.fillText("ICARUS", FB_W / 2 + 5, 71);      // the offset shadow
+  g.strokeStyle = "#000"; g.lineWidth = 6; g.strokeText("ICARUS", FB_W / 2, 66);   // the hard outline
+  g.fillStyle = "rgb(255, 0, 0)"; g.fillText("ICARUS", FB_W / 2, 66);
+  const d = g.getImageData(0, 0, FB_W, LH).data, bits = new Int16Array(FB_W * LH).fill(-1);
+  for (let i = 0; i < bits.length; i++) {
+    if (!(d[i * 4 + 3] >= 128)) continue;
+    const r = d[i * 4];
+    bits[i] = r < 43 ? 0 : r < 128 ? 85 : r < 213 ? 170 : 255;
+  }
+  return bits;
+}
+function stampLogo(y) {
+  if (!logoBits) { try { logoBits = makeLogo(); } catch (e) { logoBits = new Int16Array(0); } }
+  if (logoBits.length !== FB_W * 84) { pxText("ICARUS", FB_W / 2, y + 22, 6, 255, "center", true); return; }
+  for (let yy = 0; yy < 84; yy++) {
+    const fy = y + yy;
+    if (fy < 0 || fy >= FB_H) continue;
+    for (let x = 0; x < FB_W; x++) { const v = logoBits[yy * FB_W + x]; if (v >= 0) fb[fy * FB_W + x] = v; }
+  }
+}
+function drawTitle(now) {
+  drawRain();
+  const t = now / 1000;
+  drawSun(now, { x: W / 2, y: H * 0.3, r: 260, flare: 0.15, face: 0, melt: 0.2 + 0.15 * Math.sin(t * 0.5), dim: true });
+  stampLogo(10);
+  pxText("LIVE.AND.DIE · FLIGHT DIVISION", FB_W / 2, 94, 1, 170, "center", true);
+  pxText("TILT TO CLIMB. ROLL TO TURN. FLY THE HIGHWAY TO THE SUN.", FB_W / 2, 108, 1, 85, "center", true);
+  pxText("GET CLOSE. BURN. FALL. THE ORACLE IS WAITING.", FB_W / 2, 118, 1, 85, "center", true);
+  menuItem(startError ? "ERROR · RETRY" : "START", FB_W / 2, 134, startGame, 2, ((now / 400) | 0) & 1 ? 255 : 170);
+  menuRow([["TRUTHS", showTruths], [`3D: ${stereo ? "ON" : "OFF"}`, toggleStereo]], 164);
+  menuItem("← LIVEANDDIE.XYZ", FB_W / 2, 182, () => { location.href = "https://liveanddie.xyz/"; });
+  pxText("PLAY SIDEWAYS · SOUND ON", FB_W / 2, 208, 1, 85, "center");
+}
+function drawBoot(now) {
+  const t = (now - screenStart) / 1000;
+  if (t > 0.6 && t < 1.5) pxText("LIVE.AND.DIE", FB_W / 2, 108, 1, t < 0.8 ? 85 : 170, "center");
+}
+const WARNING = ["PRECAUTIONS", "", "TAKE A BREAK EVERY 15 MINUTES.", "DO NOT LOOK DIRECTLY AT THE SUN.", "IF YOU FEEL WARM, YOU ARE CLOSE.",
+                 "WAX IS NOT A PERSONAL FLOTATION DEVICE.", "THE COMPANY IS NOT LIABLE FOR MELTING.", "", "LIVE.AND.DIE FLIGHT DIVISION"];
+function drawWarning(now) {
+  pxFrame(8, 8, FB_W - 16, FB_H - 16, 170); pxFrame(11, 11, FB_W - 22, FB_H - 22, 85);
+  pxText("WARNING", FB_W / 2, 22, 3, 255, "center");
+  WARNING.forEach((l, i) => pxText(l, FB_W / 2, 58 + i * 13, 1, i === 0 ? 255 : i === WARNING.length - 1 ? 85 : 170, "center"));
+  if (((now / 450) | 0) & 1) pxText("TAP TO CONTINUE", FB_W / 2, 194, 1, 255, "center");
+}
+// Alignment: a test pattern; the mark shows how the phone is held now compared with when this screen
+// opened. Bring it to the centre, then tap to fly (that pose becomes "level").
+let alignOk = 0;
+function drawAlign(now) {
+  const cx = FB_W / 2, cy = FB_H / 2, blink = ((now / 300) | 0) & 1;
+  for (let x = cx % 32; x < FB_W; x += 32) pxRect(x, 0, 1, FB_H, 85);
+  for (let y = cy % 32; y < FB_H; y += 32) pxRect(0, y, FB_W, 1, 85);
+  pxFrame(cx - 64, cy - 40, 129, 81, 170); pxFrame(cx - 32, cy - 20, 65, 41, 170);
+  pxRect(cx - 12, cy, 25, 1, 255); pxRect(cx, cy - 12, 1, 25, 255);
+  let dx = 0, dy = 0;
+  if (gyro.seen && !gyro.calibrate) {
+    let db = gyro.beta - gyro.beta0;
+    if (db > 180) db -= 360; else if (db < -180) db += 360;
+    dx = (gyro.gamma - gyro.gamma0) * 3; dy = -db * 3 * PITCH_SIGN;
+  }
+  dx = clamp(dx, -170, 170); dy = clamp(dy, -100, 100);
+  const centered = Math.abs(dx) < 7 && Math.abs(dy) < 7;
+  if (eyeNow <= 0) alignOk = centered ? alignOk + 1 : 0;
+  const mx = Math.round(cx + dx), my = Math.round(cy + dy);
+  pxFrame(mx - 5, my - 5, 11, 11, centered ? 255 : 170); pxRect(mx - 1, my - 1, 3, 3, 255);
+  pxText("ALIGNMENT", cx, 8, 2, 255, "center", true);
+  if (alignOk > 20) { if (blink) pxText("ALIGNED · TAP TO FLY", cx, FB_H - 18, 1, 255, "center", true); }
+  else pxText("TILT UNTIL THE MARK IS CENTERED · TAP TO FLY", cx, FB_H - 18, 1, 170, "center", true);
+}
+function drawTruthsView() {
+  const v = truthsView, PER = 15, pages = Math.ceil(v.rows.length / PER);
+  pxFrame(2, 2, FB_W - 4, FB_H - 4, 170);
+  pxText("TRUTHS", FB_W / 2, 8, 2, 255, "center");
+  pxText(v.count, FB_W / 2, 26, 1, 170, "center");
+  v.rows.slice(v.page * PER, v.page * PER + PER).forEach((r, i) => {
+    const y = 38 + i * 10;
+    pxText(r.num, 10, y, 1, r.deep ? 255 : 85);
+    pxText(r.text, 34, y, 1, r.has ? 255 : 85);
+  });
+  const items = [];
+  if (v.page > 0) items.push(["< PREV", () => { v.page--; }]);
+  if (v.page < pages - 1) items.push(["NEXT >", () => { v.page++; }]);
+  items.push(["BACK", () => { truthsView = null; }]);
+  menuRow(items, FB_H - 17);
+  pxText(`${v.page + 1}/${pages}`, FB_W - 8, FB_H - 15, 1, 85, "right");
+}
+function drawTurn(now) {
+  const a = (Math.sin(now / 600) * 0.5 + 0.5) * (Math.PI / 2), cx = FB_W / 2, cy = 62, c = Math.cos(a), s = Math.sin(a);
+  const P = [[-14, -24], [14, -24], [14, 24], [-14, 24]].map(([x, y]) => [cx + x * c - y * s, cy + x * s + y * c]);
+  for (let i = 0; i < 4; i++) pxLine(P[i][0], P[i][1], P[(i + 1) % 4][0], P[(i + 1) % 4][1], 255);
+  pxText("TURN", FB_W / 2, 104, 4, 255, "center");
+  pxText("SIDEWAYS", FB_W / 2, 142, 4, 255, "center");
+  pxText("ICARUS IS PLAYED IN LANDSCAPE", FB_W / 2, 196, 1, 170, "center");
+}
+
+// ---------- One frame of flight ----------
+function drawFlight(now, dt) {
+  const ex = eyeNow * EYE_SEP;                     // 3D: each eye from a little to the side
+  camOff.x += view.hz * ex; camOff.z -= view.hx * ex; handEye = eyeNow * 0.03;
+  drawRain();
   const sun = sunState(now);
-  updateDrips(dt, sun);
-
+  if (dt > 0) updateDrips(dt, sun);
+  drawWorld(now, dt, sun);
+  tearFrame();
+  drawDrips();
+  drawBody(now);
+  drawWax(dt);
+  drawFeathers(dt);
+  drawVisor();
   if (mode === "melt") {
     const t = (now - meltStart) / 1000;
-    drawWorld(now, dt, sun);
-    drawDrips();                      // the sun's drips and the wings' wax, falling with you
-    drawBody(now);                    // CRASH: bones over the camera; you fall through the gaps
-    drawWax(dt);
-    drawFeathers(dt);
-    drawVisor();                      // the drops slide off as you fall
-    // Just before the water, one line (and its whisper)
     if (t >= FALL_TEXT_AT) {
       if (!fallWhispered) { fallWhispered = true; whisper(); }
       caption("he also flew.", (t - FALL_TEXT_AT) / 0.5);
     }
-    return;
+  } else if (now < lieTextUntil) caption("that's not the sun", Math.min(1, (lieTextUntil - now) / 600), H * 0.6);
+  drawHUD(now);
+  camOff.x -= view.hz * ex; camOff.z += view.hx * ex; handEye = 0;
+}
+function drawScreen(now, dt) {
+  if (portrait()) { drawTurn(now); return; }
+  if (truthsView) { drawTruthsView(); return; }
+  if (mode === "title") drawTitle(now);
+  else if (mode === "boot") drawBoot(now);
+  else if (mode === "warning") drawWarning(now);
+  else if (mode === "align") drawAlign(now);
+  else if (mode === "oracle") { if (oracle) drawOracle(now); }
+  else drawFlight(now, dt);
+}
+function render(now, dt) {
+  // Renderer failing: sometimes it just doesn't draw a new frame (the world keeps moving)
+  if (stutterLeft > 0) { stutterLeft--; return; }
+  if (Math.random() < glitchAmt() * 0.05) stutterLeft = 1 + ((Math.random() * 3) | 0);
+  frameNo++;
+  menu = [];
+  if (mode === "oracle" && oracle && !portrait()) updateOracle(now);
+  const eyes = stereo ? 2 : 1;
+  for (let e = 0; e < eyes; e++) {
+    eyeNow = stereo ? (e ? 1 : -1) : 0;
+    menuReg = e === 0;
+    fb.fill(0);
+    drawScreen(now, e === 0 ? dt : 0);
+    present(e, e * FB_W);
   }
-
-  drawWorld(now, dt, sun);
-  tearFrame();                        // lines tear and offset at high heat
-  drawDrips();                        // the sun melting past you; wax running off the wings at the edges
-  drawBody(now);                      // the hands, burning to the bone as heat rises
-  drawWax(dt);
-  drawFeathers(dt);
-  drawVisor();                        // wax on the lens, over everything
-  if (mode === "live" && now < lieTextUntil) caption("that's not the sun", Math.min(1, (lieTextUntil - now) / 600), H * 0.6);
+  eyeNow = 0;
 }
 
 // ============================================================
@@ -2815,83 +2938,120 @@ function loop() {
   const now = performance.now();
   const dt = Math.min((now - lastFrame) / 1000, 0.1);
   lastFrame = now;
-  step(now, dt);
+  if (!portrait()) {
+    if (mode === "live" || mode === "melt" || mode === "oracle") step(now, dt);
+    else { updateRain(dt); updateScreens(now); }
+  }
   render(now, dt);
 }
 
 // ============================================================
-// Setup
+// Screens, taps, setup
 // ============================================================
-$("reach").onclick = async () => {
-  const btn = $("reach");
-  btn.disabled = true;
+let screenStart = performance.now(), startError = false;
+function setMode(m) { mode = m; screenStart = performance.now(); }
+function updateScreens(now) {
+  const t = (now - screenStart) / 1000;
+  if (mode === "boot" && t > 1.6) setMode("warning");
+  else if (mode === "warning" && t > 9) enterAlign();
+}
+function enterAlign() { recalibrate(); alignOk = 0; setMode("align"); }
+
+// START: unlock audio + speech, ask for motion access, go fullscreen + landscape (all inside the tap)
+async function startGame() {
+  if (audio) { setMode("boot"); return; }
   try {
     const motion = requestMotion();   // first: iOS only allows the permission prompt inside the tap
     primeSpeech();                    // speech is only allowed after a tap: unlock it now for the Oracle
     loadTruths();
-    recalibrate();                    // "level" = however the phone is held right now
-    audio = initAudio();              // must happen inside the tap
+    audio = initAudio();
     await audio.ac.resume();
     await motion;
-
-    // Go fullscreen and landscape (both must start inside the tap), then resize to match
     try { await document.documentElement.requestFullscreen({ navigationUI: "hide" }); } catch (e) { console.warn("Fullscreen failed", e); }
     try { await screen.orientation.lock("landscape"); } catch (e) { console.warn("Orientation lock failed", e); }
-    await new Promise(res => setTimeout(res, 150));
-    fit();
-
-    $("intro").classList.add("hidden");
-    mode = "live";
-    loop();
+    setTimeout(fit, 150);
+    startError = false;
+    setMode("boot");
   } catch (e) {
     console.error(e);
-    btn.textContent = "Error · retry";
-    btn.disabled = false;
+    startError = true;
   }
-};
+}
 
-$("again").onclick = () => {
-  if (!document.fullscreenElement) {
-    try { document.documentElement.requestFullscreen({ navigationUI: "hide" }).catch(e => console.warn("Fullscreen failed", e)); }
-    catch (e) { console.warn("Fullscreen failed", e); }
-  }
-  $("results").classList.add("hidden");
-  $("truthsPage").hidden = true;
+// Back to the start of a flight, facing the sun; the world laid out fresh ahead
+function resetFlight() {
+  truthsView = null;
   oracle = null;
   try { speechSynthesis.cancel(); } catch (e) { /* no speech */ }
+  speechBed(false);
   stopRecording();
   altitude = 0; altVel = 0; heat = 0; seaSince = 0;
   wax = []; feathers = []; figures = []; visorDrops = []; frags = []; burnt.clear();
   lie = null; lieTextUntil = 0; tilt = null;
   barrel = null; vloop = null; barrelCool = 0; rollHist.length = 0; pitchHist.length = 0;
   embers = []; burnAmt = 0;
-  // Back to the start, facing the sun; the world is laid out fresh ahead
   view.x = 0; travel = 0; view.yaw = 0; view.hx = 0; view.hz = 1; view.cy = 1; view.sy = 0;
   view.h = CAM_H_SEA; view.pitch = 0; bank = 0; yawRate = 0; fwdSpeed = SPEED_BASE;
   father.x = 0; father.z = FATHER_AHEAD;
   respawnAll();
   recalibrate();                      // "level" = however the phone is held when you tap
-  releaseVoice();                     // drop any leftover melt automation
+  releaseVoice();
   if (audio) audio.oracleGain.gain.setTargetAtTime(0, audio.ac.currentTime, 0.3);
   sunDrips = []; edgeDrips = [];
-  mode = "live";
-};
-
-$("voiceBtn").onclick = () => {
+  setMode("live");
+}
+function flyAgain() {
+  if (!document.fullscreenElement) {
+    try { document.documentElement.requestFullscreen({ navigationUI: "hide" }).catch(e => console.warn("Fullscreen failed", e)); }
+    catch (e) { console.warn("Fullscreen failed", e); }
+  }
+  resetFlight();
+}
+function toggleVoice() {
   voiceOn = !voiceOn;
   try { localStorage.setItem(VOICE_KEY, voiceOn ? "1" : "0"); } catch (e) { /* private mode */ }
-  $("voiceBtn").textContent = voiceOn ? "VOICE: ON" : "VOICE: OFF";
-  if (!voiceOn) { try { speechSynthesis.cancel(); } catch (e) { /* no speech */ } }
+  if (!voiceOn) { try { speechSynthesis.cancel(); } catch (e) { /* no speech */ } speechBed(false); }
   else if (oracle) speakTruth(oracle.truth.text);
-};
-$("saveClip").onclick = () => saveClip();
-$("truthsBtn").onclick = $("truthsBtn2").onclick = () => showTruths();
-$("truthsClose").onclick = () => { $("truthsPage").hidden = true; };
+}
+function toggleStereo() {
+  stereo = !stereo;
+  try { localStorage.setItem(STEREO_KEY, stereo ? "1" : "0"); } catch (e) { /* private mode */ }
+  prevLv[0].fill(0); prevLv[1].fill(0);
+  fit();
+}
 
+// A tap on the panel: hit-test this frame's menu items (in 3D, either eye's half works)
+function tapAt(clientX, clientY) {
+  const r = canvas.getBoundingClientRect();
+  if (!r.width || !r.height) return false;
+  const fx = (((clientX - r.left) / r.width) * FB_W * (stereo ? 2 : 1)) % FB_W, fy = ((clientY - r.top) / r.height) * FB_H;
+  for (const m of menu) {
+    if (fx >= m.x - 4 && fx <= m.x + m.w + 4 && fy >= m.y - 4 && fy <= m.y + m.h + 4) { blip(); m.act(); return true; }
+  }
+  return false;
+}
+addEventListener("click", e => {
+  if (portrait()) return;
+  if (!truthsView && (mode === "live" || mode === "melt")) return;
+  if (tapAt(e.clientX, e.clientY) || truthsView) return;
+  if (mode === "warning") { blip(); enterAlign(); }
+  else if (mode === "align") { blip(); resetFlight(); }
+});
+addEventListener("keydown", e => {
+  if (e.key !== "Enter" || portrait()) return;
+  if (menu.length) { blip(); menu[0].act(); }
+  else if (mode === "warning") enterAlign();
+  else if (mode === "align") resetFlight();
+});
+
+addEventListener("resize", fit);
+if (screen.orientation) screen.orientation.addEventListener("change", fit);
 // Browsers may suspend audio in the background; wake it on return
 document.addEventListener("visibilitychange", () => {
   if (!document.hidden && audio) audio.ac.resume();
 });
+fit();
+loop();
 </script>
 </body>
 </html>
